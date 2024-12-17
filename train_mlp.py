@@ -28,15 +28,15 @@ for layer in mlp_model.children():
         'bias': layer.bias.data.clone()
     })
 
-# Hyperparameters
 epochs = 20
 batch_size = 100
-learning_rate = 1e-3
+learning_rate = 1e-2
+momentum=0.9
 
 # Training
 trainloader, testloader = get_bMNIST(batch_size)
-optimizer = optim.Adam(mlp_model.parameters(), lr=learning_rate)
-scheduler = StepLR(optimizer, step_size=10, gamma=0.5) 
+optimizer = optim.SGD(mlp_model.parameters(), lr=learning_rate, momentum=momentum)
+scheduler = StepLR(optimizer, step_size=10, gamma=1) 
 bce_loss = nn.BCEWithLogitsLoss()
 def bce_loss2(outputs, labels): # Modified loss function that plays nice with our MLP
     return bce_loss(outputs[0], labels)

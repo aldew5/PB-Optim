@@ -25,30 +25,32 @@ class MLP(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
 
-        # Define hidden layers
         self.fc1 = nn.Linear(in_features, hidden_features)
         self.fc2 = nn.Linear(hidden_features, hidden_features)
         self.fc3 = nn.Linear(hidden_features, out_features)
 
-        # Initialize hidden weights from univariate N(init_mean, init_std)
+        # weights init N(init_mean, init_std) (we take std = 0.04)
         nn.init.normal_(self.fc1.weight, init_mean, init_std)
         nn.init.normal_(self.fc2.weight, init_mean, init_std)
         nn.init.normal_(self.fc3.weight, init_mean, init_std)
 
-        # Clamp weights to be within 2 standard deviations from the mean
+        # weights within 2 std of mean
         self.fc1.weight.data = torch.clamp(self.fc1.weight.data, init_mean - 2 * init_std, init_mean + 2 * init_std)
         self.fc2.weight.data = torch.clamp(self.fc2.weight.data, init_mean - 2 * init_std, init_mean + 2 * init_std)
         self.fc3.weight.data = torch.clamp(self.fc3.weight.data, init_mean - 2 * init_std, init_mean + 2 * init_std)
 
-        # Initialize biases
+        # bias fixed at 0.1 for first layer
         nn.init.constant_(self.fc1.bias, 0.1)
+        # zero for remaining
         nn.init.zeros_(self.fc2.bias)
         nn.init.zeros_(self.fc3.bias)
 
     def forward(self, x):
         x = x.view(-1, self.in_features)
+        # relu for hidden layers
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
+        # last layer linear
         x = self.fc3(x)
 
         return (x,)
