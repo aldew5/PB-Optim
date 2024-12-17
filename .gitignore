@@ -1,0 +1,8 @@
+# Ignore raw data
+**/__pycache__/
+data/raw
+checkpoints
+.venv
+*.pt
+*.pkl
+*.npz
