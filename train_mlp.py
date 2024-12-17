@@ -15,7 +15,7 @@ from models.mlp import MLP
 # Setup
 set_seed(42)
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-SAVE_WEIGHTS = True
+SAVE_WEIGHTS = False
 
 # Model
 mlp_model = MLP().to(device)
@@ -33,7 +33,7 @@ batch_size = 100
 learning_rate = 1e-2
 momentum=0.9
 
-# Training
+# training
 trainloader, testloader = get_bMNIST(batch_size)
 optimizer = optim.SGD(mlp_model.parameters(), lr=learning_rate, momentum=momentum)
 scheduler = StepLR(optimizer, step_size=10, gamma=1) 
@@ -44,7 +44,7 @@ def bce_loss2(outputs, labels): # Modified loss function that plays nice with ou
 mlp_losses, mlp_accs = train(mlp_model, epochs, optimizer, scheduler, trainloader, bce_loss2, device)
 evaluate_MLP(mlp_model, testloader, device, mlp_losses, mlp_accs, plot=True, save_plot=False)
 
-# Extract trained weights
+# extract and save weights
 w1 = []
 for layer in mlp_model.children():
     w1.append({
@@ -52,12 +52,10 @@ for layer in mlp_model.children():
         'bias': layer.bias.data.clone()
     })
     
-# Save weights
+
 if SAVE_WEIGHTS:
-    # mkdir if doesn't exist
     path = Path("./checkpoints/mlp")
     path.mkdir(parents=True, exist_ok=True)
     
-    # save weights
     torch.save(w0, './checkpoints/mlp/w0.pt')
     torch.save(w1, './checkpoints/mlp/w1.pt')

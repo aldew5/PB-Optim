@@ -59,7 +59,7 @@ class BayesianNN(nn.Module):
         return x, kl1 + kl2 + kl3, p_log_sigma
     
     def kl_divergence(self, p_log_sigma=None):
-        if not self.training:
-            p_log_sigma = p_log_sigma or self.p_log_sigma
+        if p_log_sigma is None:
+            p_log_sigma = self.p_log_sigma
             
         return self.bl1.kl_divergence(p_log_sigma) + self.bl2.kl_divergence(p_log_sigma) + self.bl3.kl_divergence(p_log_sigma)

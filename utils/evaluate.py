@@ -43,7 +43,7 @@ def evaluate_MLP(model: MLP, testloader, device, losses: list[float] = None, acc
 def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, b, c, N_samples, device, losses: list[float] = None, accs: list[float] = None, plot=False, save_plot=False):
     model.eval()
     
-    # Discretize prior std
+    # discretize prior std
     j = b * (torch.log(c) - 2 * model.p_log_sigma)
     
     j_up = torch.ceil(j)
@@ -63,6 +63,7 @@ def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, b, c, N_samp
         kl_disc = kl_down
     
     train_acc = 0
+    # compute average empirical error for N_samples
     with torch.no_grad():
         for inputs, labels in trainloader:
             inputs, labels = inputs.to(device), labels.to(device).float().view(-1, 1)
@@ -79,9 +80,13 @@ def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, b, c, N_samp
     with torch.no_grad():
         for inputs, labels in testloader:
             inputs, labels = inputs.to(device), labels.to(device).float().view(-1, 1)
+            
+
+            # Stack outputs with the print statement inside
             outputs = torch.stack([model(inputs, p_log_sigma_disc)[0] for _ in range(N_samples)])
             preds = torch.round(torch.sigmoid(outputs))
             test_acc += torch.sum(preds == labels).item()
+            
     
     test_acc /= len(testloader.dataset) * N_samples
     print(f'acc_test: {test_acc}')
