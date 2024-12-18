@@ -23,5 +23,6 @@ def get_bMNIST(batch_size):
     
     trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
     testloader = DataLoader(testset, batch_size=batch_size, shuffle=False)
+
     
     return trainloader, testloader

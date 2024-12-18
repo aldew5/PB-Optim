@@ -31,7 +31,7 @@ for layer in mlp_model.children():
 epochs = 20
 batch_size = 100
 learning_rate = 1e-2
-momentum=0.9
+momentum= 0.9
 
 # training
 trainloader, testloader = get_bMNIST(batch_size)

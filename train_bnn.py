@@ -39,6 +39,7 @@ m = torch.tensor(60000, dtype=torch.float32).to(device)
 b = torch.tensor(100, dtype=torch.float32).to(device)
 c = torch.tensor(0.1, dtype=torch.float32).to(device)
 pi = torch.tensor(math.pi, dtype=torch.float32).to(device)
+delta_prime = 0.01
 
 # Training
 optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
@@ -50,20 +51,20 @@ def pac_bayes_loss2(outputs, labels):
 if not LOAD_DATA:
     bnn_losses, bnn_accs = train(bnn_model, epochs, optimizer, scheduler, trainloader, pac_bayes_loss2, device)
 
-    N_samples = 20
+    N_samples = 10
     plot = True
     save_plot = False
     # add delta' = 0.01 from 
-    evaluate_BNN(bnn_model, trainloader, testloader, delta + 0.01, b, c, N_samples, device, bnn_losses, bnn_accs, plot=plot, save_plot=save_plot)
+    evaluate_BNN(bnn_model, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, bnn_losses, bnn_accs, plot=plot, save_plot=save_plot)
 else:
     params = torch.load('./checkpoints/bnn/baseline.pt', weights_only=True)
     #print("HERE", params)
     bnn_model.load_state_dict(params)
     
-    N_samples = 20
+    N_samples = 10
     plot = False
     save_plot = False
-    evaluate_BNN(bnn_model, trainloader, testloader, delta + 0.01, b, c, N_samples, device, plot=plot, save_plot=save_plot)
+    evaluate_BNN(bnn_model, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, plot=plot, save_plot=save_plot)
     
 
 # Save weights

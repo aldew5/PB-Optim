@@ -1,5 +1,6 @@
 import torch
 import matplotlib.pyplot as plt
+import math
 
 from models.mlp import MLP
 from models.bnn import BayesianNN
@@ -40,7 +41,8 @@ def evaluate_MLP(model: MLP, testloader, device, losses: list[float] = None, acc
     
     return test_acc
     
-def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, b, c, N_samples, device, losses: list[float] = None, accs: list[float] = None, plot=False, save_plot=False):
+def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, losses: list[float] = None, 
+                 accs: list[float] = None, plot=False, save_plot=False):
     model.eval()
     
     # discretize prior std
@@ -80,7 +82,6 @@ def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, b, c, N_samp
     with torch.no_grad():
         for inputs, labels in testloader:
             inputs, labels = inputs.to(device), labels.to(device).float().view(-1, 1)
-            
 
             # Stack outputs with the print statement inside
             outputs = torch.stack([model(inputs, p_log_sigma_disc)[0] for _ in range(N_samples)])
@@ -93,7 +94,15 @@ def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, b, c, N_samp
     
     print(f'KL divergence: {kl_disc}')
     # using the bound on the inverse KL
-    pac_bayes_bound = train_err + torch.sqrt(0.5 * (kl_disc + torch.log(m) - torch.log(delta)) / (m - 1))
+    kl_inv1 = train_err + torch.sqrt(0.5 *(1/(150000)* torch.log(torch.tensor(2)/delta_prime)))
+    BRE = (kl_disc + 2 * torch.log(b * (torch.log(c) - 2 * p_log_sigma_disc)) + torch.log(m * math.pi ** 2) - torch.log(6 * delta)) / (m - 1)
+    
+    #test = (5977 + 2 * torch.log(b * (torch.log(c) - 2* model.p_log_sigma)) + torch.log(m * math.pi ** 2) - torch.log(6 * delta)) / (m - 1)
+    #print("TESTING", torch.sqrt(0.5 * test), 2* model.p_log_sigma)
+
+
+    #print("FIRST", torch.sqrt(0.5 * BRE), kl_inv1, train_err, torch.log(torch.tensor(2)/delta_prime))
+    pac_bayes_bound = kl_inv1 + torch.sqrt(0.5 * BRE)
     print(f'PAC-Bayes bound: {pac_bayes_bound}')
     
     if plot or save_plot:
