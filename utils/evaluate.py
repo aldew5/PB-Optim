@@ -4,7 +4,7 @@ import math
 
 from models.mlp import MLP
 from models.bnn import BayesianNN
-from utils.newtons import pac_bound, normal_kl
+from utils.newtons import pac_bound
 
 def evaluate_MLP(model: MLP, testloader, device, losses: list[float] = None, accs: list[float] = None, plot=False, save_plot=False):
     model.eval()
