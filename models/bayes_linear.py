@@ -31,7 +31,9 @@ class BayesianLinear(nn.Module):
 
         self.kfac = kfac
         if kfac:
+            # approx activation cov
             self._A = None
+            # approx gradient cov
             self._G = None
 
         self.in_features = in_features
@@ -63,7 +65,7 @@ class BayesianLinear(nn.Module):
     def forward(self, x, p_log_sigma):
         if self.kfac:
             activations = x.clone().detach()  # Detach to avoid unnecessary gradients
-            self._A = activations.t() @ activations / activations.size(0)
+            self._A = activations.T @ activations / activations.size(0)
 
         # Using reparameterization trick (rsample)
         p_sigma = torch.exp(p_log_sigma)
@@ -80,7 +82,7 @@ class BayesianLinear(nn.Module):
         outputs = F.linear(x, weight, bias)
 
         if self.kfac:
-            self._G = outputs.t() @ outputs / outputs.size(0)
+            self._G = outputs.T @ outputs / outputs.size(0)
 
         return outputs, kl
     

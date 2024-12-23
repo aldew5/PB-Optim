@@ -35,7 +35,6 @@ def train(model: nn.Module,
             
             inputs, labels = inputs.to(device), labels.to(device).float().view(-1, 1)
             outputs = model(inputs)
-
             loss_size = loss_fn(outputs, labels)
             loss_size.backward()
             optimizer.step()

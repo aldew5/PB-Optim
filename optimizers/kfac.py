@@ -12,7 +12,13 @@ import matplotlib.pyplot as plt
 
 from models.bayes_linear import BayesianLinear
 
-device = ''
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+def kron_mv(A, G, v):
+    # Efficient matrix-vector multiplication using the Kronecker product
+    m, n = A.shape[0], G.shape[0]
+    v = v.view(n, m)
+    return (G @ v) @ A.t()
 
 class KFACOptimizer(optim.Optimizer):
     def __init__(self, model, lr=0.01, damping=1e-1):
@@ -32,7 +38,7 @@ class KFACOptimizer(optim.Optimizer):
                     grad = param.grad
                     if grad is None:
                         continue
-
+                    
                     if name[2] == 'w': # weights
                         A, G = layer._A, layer._G
                         if A is None or G is None:
@@ -40,15 +46,15 @@ class KFACOptimizer(optim.Optimizer):
 
                         A_inv = torch.inverse(A + self.defaults['damping'] * torch.eye(A.size(0)).to(device))
                         G_inv = torch.inverse(G + self.defaults['damping'] * torch.eye(G.size(0)).to(device))
+                        natural_grad = kron_mv(A_inv, G_inv, grad.view(-1))
 
-                        preconditioned_grad = G_inv @ grad @ A_inv.t()
-
-                        param.data -= self.defaults['lr'] * preconditioned_grad
+                        param.data -= self.defaults['lr'] * natural_grad
                     elif name[2] == 'b': # biases
                         param.data -= self.defaults['lr'] * grad
                     else:
                         raise ValueError(f"Unknown parameter name: {name}")
-
+                    
+                  
         self.model.p_log_sigma.data -= self.defaults['lr'] * self.model.p_log_sigma.grad
 
         return loss

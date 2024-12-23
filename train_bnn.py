@@ -10,14 +10,15 @@ from utils.seed import set_seed
 from utils.pac_bayes_loss import pac_bayes_loss
 from utils.train import train
 from utils.evaluate import evaluate_BNN
+from optimizers.kfac import *
 
 from models.bnn import BayesianNN
 
 # Setup
 set_seed(42)
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-SAVE_WEIGHTS = False
-LOAD_DATA = True
+SAVE_WEIGHTS = True
+LOAD_DATA = False
 
 # Load trained weights
 w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
@@ -27,12 +28,12 @@ w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 # prior mean: w0 (MLP random init)
 # prior var: lambda = e^{-6}
 # posterior mean: w1 (MLP learned weights)
-bnn_model = BayesianNN(w0, w1, p_log_sigma=-6).to(device)
+bnn_model = BayesianNN(w0, w1, p_log_sigma=-6,  kfac=True).to(device)
 
 # Hyperparameters
-epochs = 40
+epochs = 120
 batch_size = 100
-learning_rate = 1e-3
+learning_rate = 1e-2
 
 delta = torch.tensor(0.025, dtype=torch.float32).to(device)
 m = torch.tensor(60000, dtype=torch.float32).to(device)
@@ -42,9 +43,11 @@ pi = torch.tensor(math.pi, dtype=torch.float32).to(device)
 delta_prime = 0.01
 
 # Training
-optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
+#optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
+optimizer = KFACOptimizer(bnn_model, learning_rate)
 scheduler = StepLR(optimizer, step_size=30, gamma=1.0)  # Decay by 0.5 every 10 epochs
 trainloader, testloader = get_bMNIST(batch_size)
+
 def pac_bayes_loss2(outputs, labels):
     return pac_bayes_loss(outputs, labels, m, b, c, pi, delta)
 
@@ -74,5 +77,5 @@ if SAVE_WEIGHTS:
     path.mkdir(parents=True, exist_ok=True)
     
     # save weights
-    name = 'baseline'
+    name = 'diagonal'
     torch.save(bnn_model.state_dict(), f'./checkpoints/bnn/{name}.pt')

@@ -3,7 +3,7 @@ import torch
 import torch.optim as optim
 
 
-from models.bayes_nondiag import BayesNonDiag
+from models.bayes_linear import BayesianLinear
 
 device = ''
 
@@ -20,19 +20,22 @@ class DiagHessianOptimizer(optim.Optimizer):
             loss = closure()
 
         for layer in self.model.modules():
-            if isinstance(layer, BayesNonDiag):
+            if isinstance(layer, BayesianLinear):
                 for name, param in layer.named_parameters():
                     grad = param.grad
                     if grad is None:
                         continue
-
+                    
+                    # only condition weights?
                     if name[2] == 'w': # weights
-                        param.data -= self.defaults['lr'] * torch.diag(2 * torch.exp(layer.q_weight_log_cov)) @ grad
+                        #print(torch.diag(2 * torch.exp(layer.q_bias_log_sigma)))
+                        param.data -= self.defaults['lr'] * torch.diag(2 * torch.exp(layer.q_weight_log_sigma)) @ grad
                     elif name[2] == 'b': # biases
-                        param.data -= self.defaults['lr'] * grad
+                        #print(self.defaults['lr'] * torch.diag(2 * torch.exp(layer.q_bias_log_sigma)))
+                        param.data -= self.defaults['lr'] * torch.diag(2 * torch.exp(layer.q_bias_log_sigma)) @ grad
                     else:
                         raise ValueError(f"Unknown parameter name: {name}")
 
-        self.model.p_log_cov.data -= self.defaults['lr'] * self.model.p_log_cov.grad
+        self.model.p_log_sigma.data -= self.defaults['lr'] * self.model.p_log_sigma.grad
 
         return loss
