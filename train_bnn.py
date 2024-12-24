@@ -31,9 +31,10 @@ w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 bnn_model = BayesianNN(w0, w1, p_log_sigma=-6,  kfac=True).to(device)
 
 # Hyperparameters
-epochs = 120
+epochs = 30
 batch_size = 100
 learning_rate = 1e-2
+damping = 1e-1
 
 delta = torch.tensor(0.025, dtype=torch.float32).to(device)
 m = torch.tensor(60000, dtype=torch.float32).to(device)
@@ -44,7 +45,7 @@ delta_prime = 0.01
 
 # Training
 #optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
-optimizer = KFACOptimizer(bnn_model, learning_rate)
+optimizer = KFACOptimizer(bnn_model, learning_rate, damping)
 scheduler = StepLR(optimizer, step_size=30, gamma=1.0)  # Decay by 0.5 every 10 epochs
 trainloader, testloader = get_bMNIST(batch_size)
 
