@@ -29,6 +29,10 @@ def kron_mv(A, G, v):
     v = v.view(n, m)
     return (G @ v) @ A.t()
 
+def _welford_mean(avg: Optional[Tensor], newval: Tensor, count: int) -> Tensor:
+    return newval if avg is None else avg + (newval - avg) / count
+
+
 class KFACOptimizer(optim.Optimizer):
     def __init__(
         self, 
@@ -151,7 +155,7 @@ class KFACOptimizer(optim.Optimizer):
                 self.state["avg_grad"], grad_sample, count
             )
     
-    def _update(self, layer):
+    def _update(self, layer, name):
         """
         Update model parameters
         """
@@ -175,7 +179,6 @@ class KFACOptimizer(optim.Optimizer):
                 self.state["avg_grad"][pg_slice], group["momentum"], b1
             )
 
-    
             # update theta
             param_avg = self._new_param_averages(
                 param_avg,
@@ -236,7 +239,7 @@ class KFACOptimizer(optim.Optimizer):
                     else:
                         raise ValueError(f"Unknown parameter name: {name}")
                     """
-                    self._update()
+                    self._update(layer, name)
 
         self.model.p_log_sigma.data -= self.defaults['lr'] * self.model.p_log_sigma.grad
 
