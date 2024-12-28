@@ -51,6 +51,9 @@ class BayesianLinear(nn.Module):
         self.q_bias_mu = nn.Parameter(init_q["bias"]) 
         self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))  
 
+        # for use in optimizer. will store gradients and A, G for momentum updates
+        self.state = {}
+
     @staticmethod
     def kl_normal(p_mu, p_sigma, q_mu, q_sigma):
         """

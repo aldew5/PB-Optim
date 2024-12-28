@@ -1,38 +1,43 @@
-# @title Imports
-import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
-
-
 from models.bayes_linear import BayesianLinear
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-def kron_mv(A, G, v):
-    # Efficient matrix-vector multiplication using the Kronecker product
-    m, n = A.shape[0], G.shape[0]
-    v = v.view(n, m)
-    return (G @ v) @ A.t()
 
 class KFACOptimizer(optim.Optimizer):
-    def __init__(self, model, lr=0.01, damping=1e-1, ema_decay=0.8, momentum=0.8):
+    def __init__(self, 
+            model,
+            lr=0.01, 
+            damping=5*1e-2, 
+            beta1: float = 0.9,
+            beta2: float = 0.99999,
+            weight_decay: float = 1e-4,
+            ess: int = 1e6
+        ):
         params = [p for p in model.parameters() if p.requires_grad]
-        defaults = dict(lr=lr, damping=damping, ema_decay=ema_decay, momentum=momentum)
+        defaults = dict(lr=lr, 
+                        damping=damping, 
+                        beta1=beta1,
+                        beta2=beta2, 
+                        weight_decay=weight_decay,
+                        ess=ess)
         super().__init__(params, defaults)
         self.model = model
-        self.state = {}
+        self._numel, self._device, self._dtype = self._get_param_configs()
 
-    def _smooth_update(self, old, new, decay):
-        """Apply an exponential moving average to smooth updates."""
-        if old is None:
-            return new
-        return decay * old + (1 - decay) * new
+        # for each layer
+        self.state = {}
+        self._init_buffers()
+
+    def _init_buffers(self):
+        for group in self.param_groups:
+            numel = group["numel"]
+
+            group["momentum"] = torch.zeros(
+                numel, device=self._device, dtype=self._dtype
+            )
+
 
     def step(self, closure=None):
         loss = None
@@ -41,27 +46,8 @@ class KFACOptimizer(optim.Optimizer):
 
         for layer in self.model.modules():
             if isinstance(layer, BayesianLinear):
-                state = self.state.setdefault(layer, {})
-                A_old = state.get("A")
-                G_old = state.get("G")
-                A, G = layer._A, layer._G
-
-                if A is not None and G is not None:
-                    A_new = self._smooth_update(
-                    A_old.detach() if A_old is not None else None,
-                    A.detach(),
-                    self.defaults['ema_decay']
-                    )
-                    G_new = self._smooth_update(
-                    G_old.detach() if G_old is not None else None,
-                    G.detach(),
-                    self.defaults['ema_decay'])
-
-                    state["A"] = A_new
-                    state["G"] = G_new
-                    A_inv = torch.inverse(A_new + self.defaults['damping'] * torch.eye(A_new.size(0)).to(A_new.device))
-                    G_inv = torch.inverse(G_new + self.defaults['damping'] * torch.eye(G_new.size(0)).to(G_new.device))
-                else:
+                A_inv, G_inv = self._compute_layer_inv(layer)
+                if (A_inv is None): 
                     continue
                 
                 for name, param in layer.named_parameters():
@@ -69,28 +55,95 @@ class KFACOptimizer(optim.Optimizer):
                     if grad is None:
                         continue
                     
-                    if name[2] == 'w': # weights
-                        natural_grad = kron_mv(A_inv, G_inv, grad.view(-1))
-                        state = self.state.setdefault(param, {})
-                        if "momentum_buffer" not in state:
-                            state["momentum_buffer"] = torch.zeros_like(natural_grad)
+                    # only condition weight posterior updates
+                    if name[2] == 'w':
+                        old_grad = layer.state['grad'] if 'grad' in layer.state else torch.zeros_like(grad)
+                        grad_cur = self.defaults['beta1'] * old_grad + (1-self.defaults['beta1']) * grad
+                        self.state['grad'] = grad_cur
+                        natural_grad = self._kron_mv(A_inv, G_inv, grad_cur.view(-1))
 
-                        buf = state["momentum_buffer"]
-                        buf.mul_(self.defaults['momentum']).add_(natural_grad)
-                        param.data -= self.defaults['lr'] * buf.view_as(param)
+                        param.data -= self.defaults['lr'] * (natural_grad + self.defaults['weight_decay'])
+                       
 
                     elif name[2] == 'b': # biases
-                        state = self.state.setdefault(param, {})
-                        if "momentum_buffer" not in state:
-                            state["momentum_buffer"] = torch.zeros_like(grad)
+                        old_grad = layer.state['grad'] if 'grad' in layer.state else torch.zeros_like(grad)
+                        grad_cur = self.defaults['beta1'] * old_grad + (1-self.defaults['beta1']) * grad
 
-                        buf = state["momentum_buffer"]
-                        buf.mul_(self.defaults['momentum']).add_(grad)
-                        param.data -= self.defaults['lr'] * buf
+                        param.data -= self.defaults['lr'] * (grad_cur + self.defaults['weight_decay'])
                     else:
                         raise ValueError(f"Unknown parameter name: {name}")
                     
-                  
+                             
         self.model.p_log_sigma.data -= self.defaults['lr'] * self.model.p_log_sigma.grad
 
         return loss
+    
+    def _smooth_update(self, old, new, decay):
+        """Apply an exponential moving average to smooth updates."""
+        if old is None:
+            return new
+        return decay * old + (1 - decay) * new
+    
+    def _compute_layer_inv(self, layer):
+        """
+        Updates layer state with new values of A, G. Returns A_inv and G_inv
+        whose product is the kronecker approximation of the inverse hessian.
+        """
+        state = layer.state
+        # cnt indexes the layer
+        A_old = state.get("A")
+        G_old = state.get("G")
+        A, G = layer._A, layer._G
+
+        if A is not None and G is not None:
+            A_new = self._smooth_update(
+                A_old.detach() if A_old is not None else None,
+                A.detach(),
+                self.defaults['beta2']
+                )
+            G_new = self._smooth_update(
+                G_old.detach() if G_old is not None else None,
+                G.detach(),
+                self.defaults['beta2']
+                )
+
+            state["A"] = A_new
+            state["G"] = G_new
+            A_inv = torch.inverse(A_new + self.defaults['damping'] * torch.eye(A_new.size(0)).to(A_new.device))
+            G_inv = torch.inverse(G_new + self.defaults['damping'] * torch.eye(G_new.size(0)).to(G_new.device))
+            return A_inv, G_inv
+        else:
+            return None, None
+        
+    def _kron_mv(self, A, G, v):
+        """
+        Computes (A \oplus G) v where \oplus is the kronecker product. 
+        It's more efficient than first computing the kronecker product
+        """
+        m, n = A.shape[0], G.shape[0]
+        v = v.view(n, m)
+        return (G @ v) @ A.t()
+    
+    def _get_param_configs(self):
+        all_params = []
+        for pg in self.param_groups:
+            pg["numel"] = sum(p.numel() for p in pg["params"] if p is not None)
+            all_params += [p for p in pg["params"] if p is not None]
+        if len(all_params) == 0:
+            return 0, torch.device("cpu"), torch.get_default_dtype()
+        devices = {p.device for p in all_params}
+        if len(devices) > 1:
+            raise ValueError(
+                "Parameters are on different devices: "
+                f"{[str(d) for d in devices]}"
+            )
+        device = next(iter(devices))
+        dtypes = {p.dtype for p in all_params}
+        if len(dtypes) > 1:
+            raise ValueError(
+                "Parameters are on different dtypes: "
+                f"{[str(d) for d in dtypes]}"
+            )
+        dtype = next(iter(dtypes))
+        total = sum(pg["numel"] for pg in self.param_groups)
+        return total, device, dtype

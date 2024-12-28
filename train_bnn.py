@@ -10,7 +10,8 @@ from utils.seed import set_seed
 from utils.pac_bayes_loss import pac_bayes_loss
 from utils.train import train
 from utils.evaluate import evaluate_BNN
-from optimizers.kfac import *
+from optimizers.kfac import KFACOptimizer
+#from optimizers.ivon import *
 
 from models.bnn import BayesianNN
 
@@ -31,7 +32,7 @@ w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 bnn_model = BayesianNN(w0, w1, p_log_sigma=-6,  kfac=True).to(device)
 
 # Hyperparameters
-epochs = 30
+epochs = 150
 batch_size = 100
 learning_rate = 1e-2
 damping = 1e-1
@@ -45,7 +46,7 @@ delta_prime = 0.01
 
 # Training
 #optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
-optimizer = KFACOptimizer(bnn_model, learning_rate, damping)
+optimizer = KFACOptimizer(bnn_model, lr=0.01)
 scheduler = StepLR(optimizer, step_size=30, gamma=1.0)  # Decay by 0.5 every 10 epochs
 trainloader, testloader = get_bMNIST(batch_size)
 

@@ -14,7 +14,6 @@ def get_bMNIST(batch_size):
                                         transform=transform)
     testset = torchvision.datasets.MNIST(root='./data/raw', train=False, download=True,
                                         transform=transform)
-    #print(len(trainset))
     # Tranform into binary MNIST
     # Classes 0, ..., 4 maps to 0
     # Classes 5, ..., 9 maps to 1
