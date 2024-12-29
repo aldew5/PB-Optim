@@ -1,6 +1,7 @@
 import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
+from singd.optim.optimizer import SINGD
 
 import math
 from pathlib import Path
@@ -11,6 +12,7 @@ from utils.pac_bayes_loss import pac_bayes_loss
 from utils.train import train
 from utils.evaluate import evaluate_BNN
 from optimizers.kfac import KFACOptimizer
+
 #from optimizers.ivon import *
 
 from models.bnn import BayesianNN
@@ -47,6 +49,8 @@ delta_prime = 0.01
 # Training
 #optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
 optimizer = KFACOptimizer(bnn_model, lr=0.01)
+#print(list(bnn_model.parameters()))
+#optimizer = optimizer = SINGD(bnn_model, lr=1e-3, warn_unsupported=False)
 scheduler = StepLR(optimizer, step_size=30, gamma=1.0)  # Decay by 0.5 every 10 epochs
 trainloader, testloader = get_bMNIST(batch_size)
 

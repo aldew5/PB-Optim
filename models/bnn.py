@@ -37,9 +37,10 @@ class BayesianNN(nn.Module):
         
         # proir variance
         self.p_log_sigma = nn.Parameter(torch.tensor(p_log_sigma, dtype=torch.float32))
-        self.bl1 = BayesianLinear(in_features, hidden_features, init_p_weights[0], init_q_weights[0], kfac=kfac)
-        self.bl2 = BayesianLinear(hidden_features, hidden_features, init_p_weights[1], init_q_weights[1], kfac=kfac)
-        self.bl3 = BayesianLinear(hidden_features, 1, init_p_weights[2], init_q_weights[2], kfac=kfac)
+        self.bl1 = BayesianLinear(in_features, hidden_features, init_p_weights[0], init_q_weights[0], 1, kfac=kfac)
+        self.bl2 = BayesianLinear(hidden_features, hidden_features, init_p_weights[1], init_q_weights[1], 2, kfac=kfac)
+        self.bl3 = BayesianLinear(hidden_features, 1, init_p_weights[2], init_q_weights[2], 3, kfac=kfac)
+
 
     def forward(self, x, p_log_sigma=None):
         if p_log_sigma is None:

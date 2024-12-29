@@ -9,6 +9,7 @@ class BayesianLinear(nn.Module):
                  out_features: int,
                  init_p: tuple[torch.Tensor, torch.Tensor],
                  init_q: tuple[torch.Tensor, torch.Tensor],
+                 id: int,
                  kfac=False):
         """Bayesian Linear Layer.
 
@@ -40,8 +41,8 @@ class BayesianLinear(nn.Module):
         self.out_features = out_features
 
         # init prior
-        self.p_weight_mu = init_p["weight"]
-        self.p_bias_mu = init_p["bias"]
+        self.p_weight_mu = nn.Parameter(init_p["weight"], requires_grad=False)
+        self.p_bias_mu = nn.Parameter(init_p["bias"], requires_grad=False)
 
         # weight means (mu) and log-std (log_sigma)
         self.q_weight_mu = nn.Parameter(init_q["weight"])  
@@ -52,7 +53,7 @@ class BayesianLinear(nn.Module):
         self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))  
 
         # for use in optimizer. will store gradients and A, G for momentum updates
-        self.state = {}
+        self.id = id
 
     @staticmethod
     def kl_normal(p_mu, p_sigma, q_mu, q_sigma):
