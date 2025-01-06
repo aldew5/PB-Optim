@@ -1,3 +1,5 @@
+
+
 import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
@@ -34,7 +36,7 @@ w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 bnn_model = BayesianNN(w0, w1, p_log_sigma=-6,  kfac=True).to(device)
 
 # Hyperparameters
-epochs = 150
+epochs = 10
 batch_size = 100
 learning_rate = 1e-2
 damping = 1e-1
@@ -47,8 +49,8 @@ pi = torch.tensor(math.pi, dtype=torch.float32).to(device)
 delta_prime = 0.01
 
 # Training
-#optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
-optimizer = KFACOptimizer(bnn_model, lr=0.01)
+optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
+#optimizer = KFACOptimizer(bnn_model, lr=0.01)
 #print(list(bnn_model.parameters()))
 #optimizer = optimizer = SINGD(bnn_model, lr=1e-3, warn_unsupported=False)
 scheduler = StepLR(optimizer, step_size=30, gamma=1.0)  # Decay by 0.5 every 10 epochs

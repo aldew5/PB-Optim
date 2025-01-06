@@ -9,6 +9,14 @@ import time
 
 SUPPORTED_MODELS = [BayesianNN, MLP]
 
+def update_G(module, grad_input, grad_output):
+    """
+    Hook to compute and store G (gradient covariance) for a given layer.
+    """
+    grad_output = grad_output[0].double() # Extract gradient from the first tuple element
+    module._G = grad_output.T @ grad_output / grad_output.size(0)  # Compute G
+
+
 def train(model: nn.Module,
           num_epochs: int, 
           optimizer: torch.optim.Optimizer, 
@@ -26,10 +34,16 @@ def train(model: nn.Module,
     
     model.train()
 
+    for name, layer in model.named_modules():
+        if isinstance(layer, torch.nn.Linear):  # Example: Only register for Linear layers
+            layer.register_backward_hook(update_G)
+
+
     for epoch in range(num_epochs):
         running_loss = 0.
         running_acc = 0.
 
+        outputs = None
         for inputs, labels in trainloader:
             optimizer.zero_grad()
             
@@ -37,6 +51,7 @@ def train(model: nn.Module,
             outputs = model(inputs)
             loss_size = loss_fn(outputs, labels)
             loss_size.backward()
+
             optimizer.step()
             
             preds = torch.round(torch.sigmoid(outputs[0]))
