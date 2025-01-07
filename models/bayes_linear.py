@@ -56,6 +56,7 @@ class BayesianLinear(nn.Module):
             # F \approx A \otimes G
             self._A = init_value * torch.eye(self.in_features) + regularization * torch.eye(self.in_features)
             self._G = init_value * torch.eye(self.out_features) + regularization * torch.eye(self.out_features)
+            self.inv_A, inv_G = None, None
             self.q_bias_cov = init_value * torch.eye(self.out_features) + regularization * torch.eye(self.out_features)
         else:
             self.q_weight_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_weight_mu))) 
@@ -72,23 +73,27 @@ class BayesianLinear(nn.Module):
             torch.log(p_sigma) - torch.log(q_sigma) + (q_sigma**2 + (p_mu - q_mu)**2) / (2 * p_sigma**2) - 0.5
         )
 
-    def forward(self, x, p_log_sigma, epsilon = 1e-5):
+    def forward(self, x, p_log_sigma, epsilon = 1e-5, iteration_number=0):
         kl, outputs = None, None
         if self.kfac:
-            # batch size x input_dim
-            activations = x.clone().detach().double()
-            # update kfactors using activations from the previous layer
-            self._A = activations.T @ activations / activations.size(0) + epsilon * torch.eye(activations.shape[1], device=activations.device)
+            # only update after each 50 iterations
+            if (iteration_number % 50 == 0):
+                # batch size x input_dim
+                activations = x.clone().detach().double()
+                # update kfactors using activations from the previous layer
+                self._A = activations.T @ activations / activations.size(0) + epsilon * torch.eye(activations.shape[1], device=activations.device)
+                self.inv_A = compute_inv(self._A)[1]
+                self.inv_G = compute_inv(self._G)[1]
 
             p_sigma = torch.exp(p_log_sigma)
-            weight = sample_from_kron_dist(self.q_weight_mu, self._A, self._G)
+            
+            weight = sample_from_kron_dist(self.q_weight_mu, self.inv_A, self.inv_G)
             weight = weight.view(self.out_features, self.in_features)
             
             bias = MultivariateNormal(loc=self.q_bias_mu, covariance_matrix=self.q_bias_cov).rsample().double()
 
-            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu, self._A, self._G)
+            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu, self.inv_A, self.inv_G)
             kl_bias = self.kl_divergence_kfac_bias(self.p_bias_mu, p_sigma, self.q_bias_mu, self.q_bias_cov)
-            #print(kl_weight, kl_bias)
             kl = kl_weight + kl_bias
         
             outputs = F.linear(x.double(), weight, bias)
@@ -130,14 +135,15 @@ class BayesianLinear(nn.Module):
             kl = kl_weight + kl_bias
         else:
             # prior 
-            inv_A = compute_inv(A)[1]
-            inv_G = compute_inv(G)[1]
-            prior_cov = torch.kron(inv_A, inv_G)
+            #inv_A = compute_inv(A)[1]
+            #inv_G = compute_inv(G)[1]
+            #prior_cov = torch.kron(inv_A, inv_G)
+            p_sigma = torch.exp(p_log_sigma)
 
             q_weight_cov = torch.kron(self._A, self._G)
-            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, prior_cov, self.q_weight_mu, q_weight_cov)
+            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu, q_weight_cov)
             # TODO: I'm not sure if prior cov should be the same for bias
-            kl_bias = self.kl_divergence_kfac_bias(self.p_bias_mu, prior_cov, self.q_bias_mu, self.q_bias_cov)
+            kl_bias = self.kl_divergence_kfac_bias(self.p_bias_mu, p_sigma, self.q_bias_mu, self.q_bias_cov)
             print(kl_weight, kl_bias)
             kl = kl_weight + kl_bias
         

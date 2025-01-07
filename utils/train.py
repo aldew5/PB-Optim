@@ -8,13 +8,15 @@ from models.bnn import BayesianNN
 import time
 
 SUPPORTED_MODELS = [BayesianNN, MLP]
+iteration_counter = {"count": 0}
 
 def update_G(module, grad_input, grad_output):
     """
     Hook to compute and store G (gradient covariance) for a given layer.
     """
-    grad_output = grad_output[0].double() # Extract gradient from the first tuple element
-    module._G = grad_output.T @ grad_output / grad_output.size(0)  # Compute G
+    if iteration_counter['count'] % 50 == 0:
+        grad_output = grad_output[0].double() # Extract gradient from the first tuple element
+        module._G = grad_output.T @ grad_output / grad_output.size(0)  # Compute G
 
 
 def train(model: nn.Module,
@@ -48,7 +50,7 @@ def train(model: nn.Module,
             optimizer.zero_grad()
             
             inputs, labels = inputs.to(device), labels.to(device).float().view(-1, 1)
-            outputs = model(inputs)
+            outputs = model(inputs, iteration_counter['count'])
             loss_size = loss_fn(outputs, labels)
             loss_size.backward()
 
@@ -57,6 +59,7 @@ def train(model: nn.Module,
             preds = torch.round(torch.sigmoid(outputs[0]))
             running_loss += loss_size.item()
             running_acc += torch.sum(preds == labels).item()
+            iteration_counter['count'] += 1
 
         running_loss /= m
         running_acc /= m

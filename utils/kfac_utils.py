@@ -12,8 +12,8 @@ def compute_layer_inv(layer, A=None, G=None, damping=1e-4):
               A, G = layer._A, layer._G
         #print(A, G)
         if A is not None and G is not None:
-            A_root_inv, A_inv = compute_cov(A, damping)
-            G_root_inv, G_inv = compute_cov(G, damping)
+            A_root_inv, A_inv = compute_inv(A, damping)
+            G_root_inv, G_inv = compute_inv(G, damping)
             return (A_root_inv, A_inv), (G_root_inv, G_inv)
         else:
             return None, None
