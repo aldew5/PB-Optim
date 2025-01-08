@@ -57,8 +57,9 @@ class BayesianLinear(nn.Module):
 
         if kfac:
             # F \approx A \otimes G
-            self._A = init_value * torch.eye(self.in_features) + regularization * torch.eye(self.in_features)
-            self._G = init_value * torch.eye(self.out_features) + regularization * torch.eye(self.out_features)
+            self._A = (init_value * torch.eye(self.in_features)).double() #+ regularization * torch.eye(self.in_features)
+            self._G = (init_value * torch.eye(self.out_features)).double() #+ regularization * torch.eye(self.out_features)
+            self.A_inv, self.G_inv = None, None
             #self.q_bias_cov = nn.Parameter(init_value * torch.eye(self.out_features) + regularization * torch.eye(self.out_features))
             self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))  
             self.q_weight_mu = init_q["weight"]
@@ -94,6 +95,8 @@ class BayesianLinear(nn.Module):
         """
         kl, outputs = None, None
         if self.kfac:
+            #print(torch.linalg.eigvals(self._A))
+            #print(torch.linalg.eigvals(self._G))
             batch_size = x.size(0)
             p_sigma = torch.exp(p_log_sigma)
             q_bias_sigma = torch.exp(self.q_bias_log_sigma)
@@ -104,14 +107,15 @@ class BayesianLinear(nn.Module):
             
             # sample weights from matrix-variate normal distr parameterized with kronecker layer factors
             with torch.no_grad():
-                self.weights = nn.Parameter(sample_mvnd(self.q_weight_mu, self.G_inv, gamma_in * self.A_inv))
+                self.weights = nn.Parameter(sample_mvnd(self.q_weight_mu, (self.G_inv + 1e-2 * torch.eye(self._G.size(0))), gamma_in * self.A_inv + 1e-2 * torch.eye(self._A.size(0))))
             # use a full covariance for the bias
             #bias = MultivariateNormal(loc=self.q_bias_mu, covariance_matrix=self.q_bias_cov).rsample()
             bias = self.q_bias_mu + q_bias_sigma * torch.randn_like(q_bias_sigma)
 
-            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu, self._A, self._G)
+            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu)
             #kl_bias = self.kl_divergence_kfac_bias(self.p_bias_mu, p_sigma, self.q_bias_mu, self.q_bias_cov)
             kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
+            #print(kl_weight.item(), kl_bias.item())
             kl = kl_weight + kl_bias
 
             outputs = F.linear(x, self.weights, bias)
@@ -170,16 +174,15 @@ class BayesianLinear(nn.Module):
             #prior_cov = torch.kron(inv_A, inv_G)
             p_sigma = torch.exp(p_log_sigma)
 
-            q_weight_cov = torch.kron(self._A, self._G)
-            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu, q_weight_cov)
+            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu)
             # TODO: I'm not sure if prior cov should be the same for bias
             kl_bias = self.kl_divergence_kfac_bias(self.p_bias_mu, p_sigma, self.q_bias_mu, self.q_bias_cov)
-            print(kl_weight, kl_bias)
+            #print(kl_weight, kl_bias)
             kl = kl_weight + kl_bias
         
         return kl
     
-    def kl_divergence_kfac_weight(self, p_weight_mu, p_sigma, q_weight_mu, A, G, epsilon=1e-5):
+    def kl_divergence_kfac_weight(self, p_weight_mu, p_sigma, q_weight_mu, epsilon=1e-3):
         """
         Compute the KL divergence between a diagonal Gaussian prior and a Kronecker-factored Gaussian posterior.
 
@@ -194,10 +197,13 @@ class BayesianLinear(nn.Module):
             float: KL divergence D_KL(prior || posterior).
         """
         # Dimensions
+        
+        A, G = self._A, self._G
         n = A.shape[0]  # Input size
         m = G.shape[0]  # Output size
-        A = A + epsilon * torch.eye(A.shape[0], device=A.device)
-        G = G + epsilon * torch.eye(G.shape[0], device=G.device)
+
+        #A = A + epsilon * torch.eye(A.shape[0], device=A.device)
+        #G = G + epsilon * torch.eye(G.shape[0], device=G.device)
 
         # Compute log determinants
         log_det_A = torch.logdet(A)
@@ -205,18 +211,20 @@ class BayesianLinear(nn.Module):
         log_det_prior = n * torch.log(p_sigma**2)  # Diagonal prior covariance
 
         # Compute trace terms
-        trace_A = torch.trace(A)  # Tr(A)
-        trace_G = torch.trace(G)  # Tr(G)
+        trace_A = torch.trace(A)  
+        trace_G = torch.trace(G) 
         trace_term = trace_A * trace_G / p_sigma**2
 
         # Compute mean difference term
         delta_mu = q_weight_mu - p_weight_mu
         delta_mu_reshaped = delta_mu.view(m, n)  # Reshape to (m, n)
 
-        inv_A = torch.linalg.inv(A)
-        inv_G = torch.linalg.inv(G)
+        #inv_A = torch.linalg.inv(A)
+        #inv_G = torch.linalg.inv(G)
 
-        quadratic_term = torch.trace(inv_G @ delta_mu_reshaped @ inv_A @ delta_mu_reshaped.T)
+        quadratic_term = torch.trace(
+            self.G_inv @ (delta_mu_reshaped @ self.A_inv @ delta_mu_reshaped.T)
+        )
 
         # KL divergence formula
         kl = 0.5 * (
@@ -259,19 +267,25 @@ class BayesianLinear(nn.Module):
 
         return kl
     
-    def _noisy_inversion(self, p_log_sigma, batch_size):
+    def _noisy_inversion(self, p_log_sigma, batch_size, damping=1e-2):
         """
         Computes the inverses of A and G.
 
         params:
             - p_log_sigma: log prior standard deviation
         """
-        A, G = self._A, self._G
         nu = torch.exp(2 * p_log_sigma)
+        lam_scaled = torch.clamp(torch.tensor(math.sqrt(self.lam / (batch_size * nu))), min=1e-2)
+        damp2 = (damping + lam_scaled) * torch.eye(self._G.size(0))
+        damp1 = (damping + lam_scaled) * torch.eye(self._A.size(0))
+        A, G = self._A + damp1, self._G + damp2
+        
 
         # TODO: ignoring pi_l
-        G_inv = torch.cholesky_inverse(G + math.sqrt(self.lam/(batch_size * nu)) * torch.eye(G.size(0))) 
-        A_inv = torch.cholesky_inverse(A + math.sqrt(self.lam/(batch_size * nu)) * torch.eye(A.size(0))) 
+        G_inv = torch.linalg.inv(G).double()
+        A_inv = torch.linalg.inv(A).double()
+
+        #print(torch.linalg.eigvals(G_inv))
         
         return A_inv, G_inv
 

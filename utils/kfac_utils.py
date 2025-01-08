@@ -137,6 +137,7 @@ def sample_mvnd(mean, row_cov, col_cov):
     # Transform the random matrix using the Kronecker structure
     sampled_matrix = mean + L_row @ Z @ L_col.T
     return sampled_matrix
+
 """
 
 def kl_divergence_kfac(mu_p, A_p, G_p, mu_q, A_q, G_q, epsilon=1e-5):
