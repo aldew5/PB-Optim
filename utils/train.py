@@ -4,19 +4,20 @@ from torch.utils.data import DataLoader
 
 from models.mlp import MLP
 from models.bnn import BayesianNN
+from models.bayes_linear import BayesianLinear
 
 import time
 
 SUPPORTED_MODELS = [BayesianNN, MLP]
-iteration_counter = {"count": 0}
+params = {"count": 0, "beta1": 0.9, "lam": 1e-1, "lr": 1e-3}
 
 def update_G(module, grad_input, grad_output):
     """
     Hook to compute and store G (gradient covariance) for a given layer.
     """
-    if iteration_counter['count'] % 50 == 0:
-        grad_output = grad_output[0].double() # Extract gradient from the first tuple element
-        module._G = grad_output.T @ grad_output / grad_output.size(0)  # Compute G
+    if params['count'] % 50 == 0:
+        grad = grad_output[0]
+        module._G = (1 - params['beta1']) * module._G  + params['beta1'] * grad.T @ grad / grad.size(0)  # Compute G
 
 
 def train(model: nn.Module,
@@ -37,7 +38,7 @@ def train(model: nn.Module,
     model.train()
 
     for name, layer in model.named_modules():
-        if isinstance(layer, torch.nn.Linear):  # Example: Only register for Linear layers
+       if isinstance(layer, BayesianLinear) and layer.kfac:
             layer.register_backward_hook(update_G)
 
 
@@ -50,16 +51,25 @@ def train(model: nn.Module,
             optimizer.zero_grad()
             
             inputs, labels = inputs.to(device), labels.to(device).float().view(-1, 1)
-            outputs = model(inputs, iteration_counter['count'])
+            outputs = model(inputs)
             loss_size = loss_fn(outputs, labels)
             loss_size.backward()
 
+            if model.kfac:
+                params['count'] += 1
+                # update means
+                for layer in model.layers:
+                    grad_ll = layer.weights.grad.detach()
+                    V = grad_ll - params['lam']/(torch.exp(2 * model.p_log_sigma) * inputs.size(0))* layer.weights
+                    with torch.no_grad():
+                        layer.q_weight_mu += params['lr'] * layer.G_inv @ V @ layer.A_inv # TODO: flipped temporarilyi
+
             optimizer.step()
-            
+
             preds = torch.round(torch.sigmoid(outputs[0]))
             running_loss += loss_size.item()
             running_acc += torch.sum(preds == labels).item()
-            iteration_counter['count'] += 1
+            #print(running_acc)
 
         running_loss /= m
         running_acc /= m

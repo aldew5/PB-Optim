@@ -45,20 +45,22 @@ class BayesianNN(nn.Module):
         self.bl2 = BayesianLinear(hidden_features, hidden_features, init_p_weights[1], init_q_weights[1], 2, kfac=kfac)
         self.bl3 = BayesianLinear(hidden_features, 1, init_p_weights[2], init_q_weights[2], 3, kfac=kfac)
 
+        self.layers = [self.bl1, self.bl2, self.bl3]
 
-    def forward(self, x, iteration_number, p_log_sigma=None):
+
+    def forward(self, x, p_log_sigma=None):
         if p_log_sigma is None:
             p_log_sigma = p_log_sigma or self.p_log_sigma
             
         x = x.view(-1, self.in_features)
 
-        x, kl1 = self.bl1(x, p_log_sigma, iteration_number)
+        x, kl1 = self.bl1(x, p_log_sigma)
         x = F.relu(x)
 
-        x, kl2 = self.bl2(x, p_log_sigma, iteration_number)
+        x, kl2 = self.bl2(x, p_log_sigma)
         x = F.relu(x)
 
-        x, kl3 = self.bl3(x, p_log_sigma, iteration_number)
+        x, kl3 = self.bl3(x, p_log_sigma)
 
         return x, kl1 + kl2 + kl3, p_log_sigma
     

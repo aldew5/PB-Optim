@@ -48,10 +48,10 @@ def compute_inv(M, damping=1e-4, eps=1e-10):
         
         # Reconstruct the inverse
         #   M^{-1} = Q diag(1/d_clamped) Q^T
-        M_root_inv = Q @ torch.diag(torch.sqrt(inv_d)) @ Q.t()
+        #M_root_inv = Q @ torch.diag(torch.sqrt(inv_d)) @ Q.t()
         M_inv = Q @ torch.diag(inv_d) @ Q.t()
 
-        return M_root_inv, M_inv
+        return M_inv
 
 import torch
 
@@ -82,7 +82,7 @@ def sample_from_kron_dist(q_weight_mu, A, G, epsilon=1e-4):
 
     # Compute Cholesky factors
     try:
-        sqrt_A = torch.linalg.cholesky(A)  # n x n
+        sqrt_A = torch.linalg.cholesky(A).double() # n x n
     except RuntimeError as e:
         raise RuntimeError(f"Cholesky decomposition failed for A: {e}")
 
@@ -92,7 +92,7 @@ def sample_from_kron_dist(q_weight_mu, A, G, epsilon=1e-4):
         raise RuntimeError(f"Cholesky decomposition failed for G: {e}")
 
     # Generate standard normal samples
-    Z = torch.randn(n, m, device=A.device, dtype=A.dtype)  # n x m
+    Z = torch.randn(n, m, device=A.device, dtype=sqrt_A.dtype)  # n x m
 
     # Transform samples using Kronecker structure to achieve Cov(Y) = A ⊗ G
     Y = sqrt_A @ Z @ sqrt_G.T  # n x m
@@ -111,6 +111,32 @@ def sample_from_kron_dist(q_weight_mu, A, G, epsilon=1e-4):
     return samples + q_weight_mu
 
 
+
+def sample_mvnd(mean, row_cov, col_cov):
+    """
+    Samples from a Matrix-Variate Normal Distribution.
+
+    Args:
+        mean (torch.Tensor): Mean matrix (m x n).
+        row_cov (torch.Tensor): Row covariance matrix (m x m).
+        col_cov (torch.Tensor): Column covariance matrix (n x n).
+    
+    Returns:
+        torch.Tensor: Sampled matrix (m x n).
+    """
+    # Shape of the mean matrix
+    m, n = mean.shape
+
+    # Cholesky decomposition or square root of covariance matrices
+    L_row = torch.linalg.cholesky(row_cov) # (m x m)
+    L_col = torch.linalg.cholesky(col_cov) # (n x n)
+
+    # Generate i.i.d. standard normal random matrix
+    Z = torch.randn(m, n) # (m x n)
+
+    # Transform the random matrix using the Kronecker structure
+    sampled_matrix = mean + L_row @ Z @ L_col.T
+    return sampled_matrix
 """
 
 def kl_divergence_kfac(mu_p, A_p, G_p, mu_q, A_q, G_q, epsilon=1e-5):

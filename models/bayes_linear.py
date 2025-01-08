@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from utils.kfac_utils import *
 from torch.distributions.multivariate_normal import MultivariateNormal
+import math
 
 
 class BayesianLinear(nn.Module):
@@ -14,7 +15,12 @@ class BayesianLinear(nn.Module):
                  id: int,
                  kfac=False,
                  regularization=1e-5,
-                 init_value=1e-2):
+                 init_value=1e-2,
+                 lam: int = 1e-1,
+                 batch_size=100,
+                 t_stat=10,
+                 t_inv=10,
+                 gamma_ex=1e-4):
         """Bayesian Linear Layer.
 
         Args:
@@ -42,9 +48,6 @@ class BayesianLinear(nn.Module):
         # init prior
         self.p_weight_mu = nn.Parameter(init_p["weight"], requires_grad=False)
         self.p_bias_mu = nn.Parameter(init_p["bias"], requires_grad=False)
-
-        # weight means (mu) and log-std (log_sigma)
-        self.q_weight_mu = nn.Parameter(init_q["weight"])  
         
         # bias means (mu) and log-std (log_sigma)
         self.q_bias_mu = nn.Parameter(init_q["bias"]) 
@@ -56,11 +59,21 @@ class BayesianLinear(nn.Module):
             # F \approx A \otimes G
             self._A = init_value * torch.eye(self.in_features) + regularization * torch.eye(self.in_features)
             self._G = init_value * torch.eye(self.out_features) + regularization * torch.eye(self.out_features)
-            self.inv_A, inv_G = None, None
-            self.q_bias_cov = init_value * torch.eye(self.out_features) + regularization * torch.eye(self.out_features)
+            #self.q_bias_cov = nn.Parameter(init_value * torch.eye(self.out_features) + regularization * torch.eye(self.out_features))
+            self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))  
+            self.q_weight_mu = init_q["weight"]
+            # initialize weights as MLP weights 
+            self.weights =  nn.Parameter(init_q["weight"])
+            
+            self.lam = lam
+            # iteration number for updating kronecker factors
+            self.k = 0
         else:
             self.q_weight_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_weight_mu))) 
             self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))  
+
+             # weight means (mu) and log-std (log_sigma)
+            self.q_weight_mu = nn.Parameter(init_q["weight"])  
 
     @staticmethod
     def kl_normal_diag(p_mu, p_sigma, q_mu, q_sigma):
@@ -73,32 +86,48 @@ class BayesianLinear(nn.Module):
             torch.log(p_sigma) - torch.log(q_sigma) + (q_sigma**2 + (p_mu - q_mu)**2) / (2 * p_sigma**2) - 0.5
         )
 
-    def forward(self, x, p_log_sigma, epsilon = 1e-5, iteration_number=0):
+    def forward(self, x, p_log_sigma, T_stats=20, beta_1=0.9):
+        """
+            params:
+                - k: current iteration number
+                - T_stats: frequency of updating A
+        """
         kl, outputs = None, None
         if self.kfac:
-            # only update after each 50 iterations
-            if (iteration_number % 50 == 0):
-                # batch size x input_dim
-                activations = x.clone().detach().double()
-                # update kfactors using activations from the previous layer
-                self._A = activations.T @ activations / activations.size(0) + epsilon * torch.eye(activations.shape[1], device=activations.device)
-                self.inv_A = compute_inv(self._A)[1]
-                self.inv_G = compute_inv(self._G)[1]
-
+            batch_size = x.size(0)
             p_sigma = torch.exp(p_log_sigma)
-            
-            weight = sample_from_kron_dist(self.q_weight_mu, self.inv_A, self.inv_G)
-            weight = weight.view(self.out_features, self.in_features)
-            
-            bias = MultivariateNormal(loc=self.q_bias_mu, covariance_matrix=self.q_bias_cov).rsample().double()
+            q_bias_sigma = torch.exp(self.q_bias_log_sigma)
+            gamma_in = self.lam/batch_size
 
-            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu, self.inv_A, self.inv_G)
-            kl_bias = self.kl_divergence_kfac_bias(self.p_bias_mu, p_sigma, self.q_bias_mu, self.q_bias_cov)
+            if self.k == 0:
+                self.A_inv, self.G_inv = self._noisy_inversion(p_log_sigma, batch_size)
+            
+            # sample weights from matrix-variate normal distr parameterized with kronecker layer factors
+            with torch.no_grad():
+                self.weights = nn.Parameter(sample_mvnd(self.q_weight_mu, self.G_inv, gamma_in * self.A_inv))
+            # use a full covariance for the bias
+            #bias = MultivariateNormal(loc=self.q_bias_mu, covariance_matrix=self.q_bias_cov).rsample()
+            bias = self.q_bias_mu + q_bias_sigma * torch.randn_like(q_bias_sigma)
+
+            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu, self._A, self._G)
+            #kl_bias = self.kl_divergence_kfac_bias(self.p_bias_mu, p_sigma, self.q_bias_mu, self.q_bias_cov)
+            kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
             kl = kl_weight + kl_bias
-        
-            outputs = F.linear(x.double(), weight, bias)
 
+            outputs = F.linear(x, self.weights, bias)
 
+            # update A every T_stats iterations
+            if  self.k % T_stats == 0:
+                # batch size x input_dim
+                activations = x.clone().detach()
+                # update kfactors using activations from the previous layer
+                self._A = (1 - beta_1) * self._A  + beta_1 * activations.T @ activations / activations.size(0) 
+                self.A_inv, self.G_inv = self._noisy_inversion(p_log_sigma, batch_size)
+                
+            
+            self.k += 1
+
+        # linear approximation
         else:
             p_sigma = torch.exp(p_log_sigma)
             q_weight_sigma = torch.exp(self.q_weight_log_sigma)
@@ -111,6 +140,7 @@ class BayesianLinear(nn.Module):
             kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
             kl = kl_weight + kl_bias
 
+            
             outputs = F.linear(x, weight, bias)
 
         return outputs, kl
@@ -181,10 +211,10 @@ class BayesianLinear(nn.Module):
 
         # Compute mean difference term
         delta_mu = q_weight_mu - p_weight_mu
-        delta_mu_reshaped = delta_mu.view(m, n).double()  # Reshape to (m, n)
+        delta_mu_reshaped = delta_mu.view(m, n)  # Reshape to (m, n)
 
-        inv_A = torch.linalg.inv(A).double()
-        inv_G = torch.linalg.inv(G).double()
+        inv_A = torch.linalg.inv(A)
+        inv_G = torch.linalg.inv(G)
 
         quadratic_term = torch.trace(inv_G @ delta_mu_reshaped @ inv_A @ delta_mu_reshaped.T)
 
@@ -228,4 +258,20 @@ class BayesianLinear(nn.Module):
         )
 
         return kl
+    
+    def _noisy_inversion(self, p_log_sigma, batch_size):
+        """
+        Computes the inverses of A and G.
+
+        params:
+            - p_log_sigma: log prior standard deviation
+        """
+        A, G = self._A, self._G
+        nu = torch.exp(2 * p_log_sigma)
+
+        # TODO: ignoring pi_l
+        G_inv = torch.cholesky_inverse(G + math.sqrt(self.lam/(batch_size * nu)) * torch.eye(G.size(0))) 
+        A_inv = torch.cholesky_inverse(A + math.sqrt(self.lam/(batch_size * nu)) * torch.eye(A.size(0))) 
+        
+        return A_inv, G_inv
 
