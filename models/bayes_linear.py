@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from utils.kfac_utils import *
-from torch.distributions.multivariate_normal import MultivariateNormal
 import math
 
 

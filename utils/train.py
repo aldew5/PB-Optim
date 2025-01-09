@@ -48,17 +48,13 @@ def train(model: nn.Module,
 
         outputs = None
         for inputs, labels in trainloader:
-            print("TP")
             optimizer.zero_grad()
-            print("KK")
             
             inputs, labels = inputs.to(device), labels.to(device).float().view(-1, 1)
             outputs = model(inputs)
             loss_size = loss_fn(outputs, labels)
-            print("LL")
             loss_size.backward()
 
-            print("GG")
             preds = torch.round(torch.sigmoid(outputs[0]))
             running_loss += loss_size.item()
             running_acc += torch.sum(preds == labels).item()
@@ -67,8 +63,6 @@ def train(model: nn.Module,
 
             if model.kfac:
                 params['count'] += 1
-
-            print("END")
 
         running_loss /= m
         running_acc /= m

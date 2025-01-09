@@ -47,6 +47,7 @@ class NoisyKFAC(optim.Optimizer):
                         V = param.grad - self.defaults['lam'] * (torch.exp(2 * self.model.p_log_sigma) * self.defaults['batch_size']) * layer.weights
                     layer.q_weight_mu += self.defaults['batch_size'] * layer.G_inv @ V @ layer.A_inv
                 else:
+                    # simple gradient descent on other parameters (bias mean)
                     if param.grad is not None:
                         param.data -= self.defaults['lr'] * param.grad
 
