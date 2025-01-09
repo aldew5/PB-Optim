@@ -143,7 +143,7 @@ class BayesianLinear(nn.Module):
 
         return outputs, kl
     
-    def kl_divergence(self, p_log_sigma=None, A=None, G=None) -> float:
+    def kl_divergence(self, p_log_sigma=None) -> float:
         """Returns KL divergence between prior and posterior distributions.
 
         Args:

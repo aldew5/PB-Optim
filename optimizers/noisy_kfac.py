@@ -11,9 +11,7 @@ class NoisyKFAC(optim.Optimizer):
             lr=0.01, 
             damping=1e-1, 
             beta1: float = 0.9,
-            beta2: float = 0.99999,
             weight_decay: float = 1e-4,
-            ess: int = 1e6,
             lam: int = 0.5,
             batch_size=100
         ):
@@ -21,9 +19,7 @@ class NoisyKFAC(optim.Optimizer):
         defaults = dict(lr=lr, 
                         damping=damping, 
                         beta1=beta1,
-                        beta2=beta2, 
                         weight_decay=weight_decay,
-                        ess=ess, 
                         lam=lam, 
                         batch_size=batch_size)
         super().__init__(params, defaults)
