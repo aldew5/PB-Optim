@@ -27,20 +27,6 @@ class KFACOptimizer(optim.Optimizer):
 
         # for each layer
         self.state = {}
-        self.d_a = {}
-        self.d_g = {}
-        self.Q_a = {}
-        self.Q_g = {}
-        self._init_buffers()
-
-    def _init_buffers(self):
-        for group in self.param_groups:
-            numel = group["numel"]
-
-            group["momentum"] = torch.zeros(
-                numel, device=self._device, dtype=self._dtype
-            )
-
 
     def step(self, closure=None):
         loss = None

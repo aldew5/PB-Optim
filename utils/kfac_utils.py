@@ -128,52 +128,12 @@ def sample_mvnd(mean, row_cov, col_cov):
     m, n = mean.shape
 
     # Cholesky decomposition or square root of covariance matrices
-    L_row = torch.linalg.cholesky(row_cov) # (m x m)
-    L_col = torch.linalg.cholesky(col_cov) # (n x n)
+    L_row = torch.linalg.cholesky(row_cov).double() # (m x m)
+    L_col = torch.linalg.cholesky(col_cov).double() # (n x n)
 
     # Generate i.i.d. standard normal random matrix
-    Z = torch.randn(m, n) # (m x n)
+    Z = torch.randn(m, n).double() # (m x n)
 
     # Transform the random matrix using the Kronecker structure
     sampled_matrix = mean + L_row @ Z @ L_col.T
     return sampled_matrix
-
-"""
-
-def kl_divergence_kfac(mu_p, A_p, G_p, mu_q, A_q, G_q, epsilon=1e-5):
-   
-    A_q = A_q + epsilon * torch.eye(A_q.shape[0], device=A_q.device)
-    G_q = G_q + epsilon * torch.eye(G_q.shape[0], device=G_q.device)
-
-    # Dimensions
-    n = A_p.shape[0]  # Input features
-    m = G_p.shape[0]  # Output features
-    
-    # Reshape mean difference
-    delta_mu = mu_q - mu_p
-    delta_mu_reshaped = delta_mu.view(m, n)  # Reshape to (m, n)
-    
-    # Log determinants
-    log_det_A_p = torch.logdet(A_p)
-    log_det_G_p = torch.logdet(G_p)
-    log_det_A_q = torch.logdet(A_q)
-    log_det_G_q = torch.logdet(G_q)
-    
-    # Trace terms
-    trace_A = torch.trace(torch.linalg.inv(A_q) @ A_p)
-    trace_G = torch.trace(torch.linalg.inv(G_q) @ G_p)
-    
-    # Quadratic term
-    inv_G_q = torch.linalg.inv(G_q)
-    inv_A_q = torch.linalg.inv(A_q)
-    quadratic_term = torch.trace(inv_G_q @ delta_mu_reshaped @ inv_A_q @ delta_mu_reshaped.T)
-    
-    # KL divergence
-    kl = 0.5 * (
-        (log_det_A_q + n * log_det_G_q) - (log_det_A_p + n * log_det_G_p) - m * n
-        + trace_A * trace_G
-        + quadratic_term
-    )
-    
-    return kl.item()
-"""
