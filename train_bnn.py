@@ -53,7 +53,7 @@ delta_prime = 0.01
 #optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
 #optimizer = KFACOptimizer(bnn_model, lr=0.01)
 #print(list(bnn_model.parameters()))
-optimizer = NoisyKFAC(bnn_model, lr=0.01)
+optimizer = NoisyKFAC(bnn_model, lr=1e-3)
 #optimizer = optimizer = SINGD(bnn_model, lr=1e-3, warn_unsupported=False)
 scheduler = StepLR(optimizer, step_size=30, gamma=1.0)  # Decay by 0.5 every 10 epochs
 trainloader, testloader = get_bMNIST(batch_size)

@@ -55,11 +55,14 @@ def train(model: nn.Module,
             loss_size = loss_fn(outputs, labels)
             loss_size.backward()
 
+            if model.kfac:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+            optimizer.step()
+
             preds = torch.round(torch.sigmoid(outputs[0]))
             running_loss += loss_size.item()
             running_acc += torch.sum(preds == labels).item()
-
-            optimizer.step()
 
             if model.kfac:
                 params['count'] += 1

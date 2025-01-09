@@ -32,8 +32,6 @@ class NoisyKFAC(optim.Optimizer):
         # only for kfac-enabled BNNs
         assert(model.kfac)
 
-        self.count = 0
-
     def step(self, closure=None):
         loss = None
         if closure is not None:
@@ -43,9 +41,11 @@ class NoisyKFAC(optim.Optimizer):
             for name, param in layer.named_parameters():
                 if name == 'weights':
                     # update the layer posterior mean
+                    #print("param", param)
+                    #print(param.grad)
                     with torch.no_grad():
-                        V = param.grad - self.defaults['lam'] * (torch.exp(2 * self.model.p_log_sigma) * self.defaults['batch_size']) * layer.weights
-                    layer.q_weight_mu += self.defaults['batch_size'] * layer.G_inv @ V @ layer.A_inv
+                        V = param.grad - self.defaults['lam'] * layer.weights
+                    layer.q_weight_mu += self.defaults['lr'] * layer.G_inv @ V @ layer.A_inv
                 else:
                     # simple gradient descent on other parameters (bias mean)
                     if param.grad is not None:
