@@ -34,7 +34,7 @@ w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 # prior mean: w0 (MLP random init)
 # prior var: lambda = e^{-6}
 # posterior mean: w1 (MLP learned weights)
-bnn_model = BayesianNN(w0, w1, p_log_sigma=-6,  kfac=True).to(device)
+bnn_model = BayesianNN(w0, w1, p_log_sigma=-6,  cat='diagonal').to(device)
 
 # Hyperparameters
 epochs = 10
@@ -50,10 +50,10 @@ pi = torch.tensor(math.pi, dtype=torch.float32).to(device)
 delta_prime = 0.01
 
 # Training
-#optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
+optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
 #optimizer = KFACOptimizer(bnn_model, lr=0.01)
 #print(list(bnn_model.parameters()))
-optimizer = NoisyKFAC(bnn_model, lr=1e-3)
+#optimizer = NoisyKFAC(bnn_model, lr=1e-3)
 #optimizer = optimizer = SINGD(bnn_model, lr=1e-3, warn_unsupported=False)
 scheduler = StepLR(optimizer, step_size=30, gamma=1.0)  # Decay by 0.5 every 10 epochs
 trainloader, testloader = get_bMNIST(batch_size)

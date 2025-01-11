@@ -10,7 +10,7 @@ class NoisyKFAC(optim.Optimizer):
             model,
             lr=0.01, 
             damping=1e-1, 
-            beta1: float = 0.9,
+            beta1: float = 1e-2,
             weight_decay: float = 1e-4,
             lam: int = 0.5,
             batch_size=100

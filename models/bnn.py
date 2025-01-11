@@ -15,7 +15,7 @@ class BayesianNN(nn.Module):
                  out_features: int = 1,
                  hidden_features: int = 300,
                  p_log_sigma: float = -6,
-                 kfac=False,
+                 cat="diagonal",
                  regularization=1e-5):
         """Bayesian Neural Network (BNN) model w/ 3 layers.
 
@@ -33,7 +33,7 @@ class BayesianNN(nn.Module):
         assert len(init_p_weights) == 3, f"Number of prior weights must be 3, got {len(init_p_weights)}"
         assert len(init_q_weights) == 3, f"Number of posterior weights must be 3, got {len(init_q_weights)}"
         
-        self.kfac = kfac
+        self.cat = cat
         self.p_log_sigma = nn.Parameter(torch.tensor(p_log_sigma, dtype=torch.float32))
         
 
@@ -41,9 +41,9 @@ class BayesianNN(nn.Module):
         self.out_features = out_features
         
         
-        self.bl1 = BayesianLinear(in_features, hidden_features, init_p_weights[0], init_q_weights[0], 1, kfac=kfac)
-        self.bl2 = BayesianLinear(hidden_features, hidden_features, init_p_weights[1], init_q_weights[1], 2, kfac=kfac)
-        self.bl3 = BayesianLinear(hidden_features, 1, init_p_weights[2], init_q_weights[2], 3, kfac=kfac)
+        self.bl1 = BayesianLinear(in_features, hidden_features, init_p_weights[0], init_q_weights[0], 1, cat=cat)
+        self.bl2 = BayesianLinear(hidden_features, hidden_features, init_p_weights[1], init_q_weights[1], 2, cat=cat)
+        self.bl3 = BayesianLinear(hidden_features, 1, init_p_weights[2], init_q_weights[2], 3, cat=cat)
 
         self.layers = [self.bl1, self.bl2, self.bl3]
 

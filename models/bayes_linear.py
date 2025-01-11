@@ -12,7 +12,7 @@ class BayesianLinear(nn.Module):
                  init_p: tuple[torch.Tensor, torch.Tensor],
                  init_q: tuple[torch.Tensor, torch.Tensor],
                  id: int,
-                 kfac=False,
+                 cat="diagonal",
                  init_value=1e-2,
                  lam: int = 1e-1,
                  damping= 1e-2):
@@ -23,7 +23,7 @@ class BayesianLinear(nn.Module):
             out_features (int): Output feature size
             init_p (tuple[torch.Tensor, torch.Tensor]): Prior initial weight and bias means
             init_q (tuple[torch.Tensor, torch.Tensor]): Posterior initial weight and bias means
-            kfac (bool, optional): KFAC optimization. Defaults to False.
+            cat (string): kfac, noisy-kfac (kfactored posterior), or diagonal
         """
         super(BayesianLinear, self).__init__()
         assert "weight" in init_p and "bias" in init_p, "Prior must contain both weight and bias"
@@ -35,7 +35,7 @@ class BayesianLinear(nn.Module):
         assert init_q["weight"].shape == (out_features, in_features), "Posterior weight shape mismatch"
         assert init_q["bias"].shape == (out_features,), "Posterior bias shape mismatch"
 
-        self.kfac = kfac
+        self.cat = cat
 
         self.in_features = in_features
         self.out_features = out_features
@@ -50,7 +50,7 @@ class BayesianLinear(nn.Module):
         # for use in optimizer. will store gradients and A, G for momentum updates
         self.id = id
 
-        if kfac:
+        if self.cat == 'noisy-kfac':
             # F \approx A \otimes G
             self._A = (init_value * torch.eye(self.in_features)).double() #+ regularization * torch.eye(self.in_features)
             self._G = (init_value * torch.eye(self.out_features)).double() #+ regularization * torch.eye(self.out_features)
@@ -65,12 +65,20 @@ class BayesianLinear(nn.Module):
             # iteration number for updating kronecker factors
             self.k = 0
             self.damping = damping
+        elif self.cat == 'kfac':
+            self._A = (init_value * torch.eye(self.in_features))
+            self._G = (init_value * torch.eye(self.out_features))
+
+            self.q_weight_mu = nn.Parameter(init_q["weight"])  
+
+            self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))  
+            self.q_weight_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_weight_mu))) 
         else:
+            # weight means (mu) and log-std (log_sigma)
+            self.q_weight_mu = nn.Parameter(init_q["weight"])  
+
             self.q_weight_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_weight_mu))) 
             self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))  
-
-             # weight means (mu) and log-std (log_sigma)
-            self.q_weight_mu = nn.Parameter(init_q["weight"])  
 
     @staticmethod
     def kl_normal_diag(p_mu, p_sigma, q_mu, q_sigma):
@@ -90,7 +98,7 @@ class BayesianLinear(nn.Module):
                 - T_stats: frequency of updating A
         """
         kl, outputs = None, None
-        if self.kfac:
+        if self.cat == 'noisy-kfac':
             batch_size = x.size(0)
             p_sigma = torch.exp(p_log_sigma)
             q_bias_sigma = torch.exp(self.q_bias_log_sigma)
@@ -102,7 +110,7 @@ class BayesianLinear(nn.Module):
             
             
             row_cov = self.G_inv + self.damping * torch.eye(self._G.size(0))
-            col_cov = gamma_in * self.A_inv + 1e-2 * torch.eye(self._A.size(0))
+            col_cov = gamma_in * self.A_inv + self.damping * torch.eye(self._A.size(0))
             # sample weights from matrix-variate normal distr parameterized with kronecker layer factors
             with torch.no_grad():
                 self.weights.data = nn.Parameter(sample_mvnd(self.q_weight_mu, row_cov, col_cov))
@@ -124,8 +132,27 @@ class BayesianLinear(nn.Module):
                 self.A_inv, self.G_inv = self._noisy_inversion(p_log_sigma, batch_size)
                 
             self.k += 1
+        
+        elif self.cat == 'kfac':
+            # update A
+            activations = x.clone().detach()  
+            self._A = activations.T @ activations / activations.size(0)
 
-        # linear approximation
+            # Using reparameterization trick (rsample)
+            p_sigma = torch.exp(p_log_sigma)
+            q_weight_sigma = torch.exp(self.q_weight_log_sigma)
+            q_bias_sigma = torch.exp(self.q_bias_log_sigma)
+
+            weight = self.q_weight_mu + q_weight_sigma * torch.randn_like(q_weight_sigma)
+            bias = self.q_bias_mu + q_bias_sigma * torch.randn_like(q_bias_sigma)
+
+            kl_weight = self.kl_normal_diag(self.p_weight_mu, p_sigma, self.q_weight_mu, q_weight_sigma)
+            kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
+            kl = kl_weight + kl_bias
+
+            outputs = F.linear(x, weight, bias)
+
+        # diagonal approximation
         else:
             p_sigma = torch.exp(p_log_sigma)
             q_weight_sigma = torch.exp(self.q_weight_log_sigma)
@@ -153,7 +180,8 @@ class BayesianLinear(nn.Module):
         Returns:
             float: KL divergence
         """
-        if not self.kfac:
+        kl = None
+        if not self.cat=='noisy-kfac':
             p_sigma = torch.exp(p_log_sigma)
             q_weight_sigma = torch.exp(self.q_weight_log_sigma)
             q_bias_sigma = torch.exp(self.q_bias_log_sigma)
