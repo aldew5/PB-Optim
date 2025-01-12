@@ -36,10 +36,11 @@ class KFACOptimizer(optim.Optimizer):
         for layer in self.model.modules():
             if isinstance(layer, BayesianLinear):
                 A_inv, G_inv = self._compute_layer_inv(layer)
-                if (A_inv is None): 
+                if (A_inv is None or G_inv is None): 
                     continue
                 
                 for name, param in layer.named_parameters():
+                    print(A_inv, G_inv)
                     grad = param.grad
                     
                     if grad is None:

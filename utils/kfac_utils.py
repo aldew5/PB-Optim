@@ -55,7 +55,7 @@ def compute_inv(M, damping=1e-4, eps=1e-10):
 
 import torch
 
-def sample_from_kron_dist(q_weight_mu, A, G, epsilon=1e-4):
+def sample_from_kron_dist(q_mu, A, G, epsilon=1e-2):
     """
     Sample from a multivariate normal distribution with covariance A ⊗ G
     without explicitly forming the Kronecker product.
@@ -69,46 +69,52 @@ def sample_from_kron_dist(q_weight_mu, A, G, epsilon=1e-4):
     Returns:
         torch.Tensor: Sample of size (m * n,).
     """
+    #print("Q MU", q_mu)
     # Ensure q_weight_mu is a 1D tensor
-    if q_weight_mu.ndim > 1:
-        q_weight_mu = q_weight_mu.view(-1)
+    if q_mu.ndim > 1:
+        q_mu = q_mu.view(-1)
 
     n = A.shape[0]
     m = G.shape[0]
 
+
     # Regularize A and G to ensure positive definiteness
-    A = A + epsilon * torch.eye(n, device=A.device, dtype=A.dtype)
-    G = G + epsilon * torch.eye(m, device=G.device, dtype=G.dtype)
+    A = A + max(A.max() * epsilon, epsilon) * torch.eye(n, device=A.device, dtype=A.dtype)
+    G = G + max(G.max() * epsilon, epsilon) * torch.eye(m, device=G.device, dtype=G.dtype)
+    #A = A / A.norm()
+    #G = G / G.norm()        
+    #print(A, G, torch.linalg.eigvals(A))
 
     # Compute Cholesky factors
     try:
-        sqrt_A = torch.linalg.cholesky(A).double() # n x n
+        sqrt_A = torch.linalg.cholesky(A) # n x n
     except RuntimeError as e:
         raise RuntimeError(f"Cholesky decomposition failed for A: {e}")
 
     try:
-        sqrt_G = torch.linalg.cholesky(G).double()  # m x m
+        sqrt_G = torch.linalg.cholesky(G)  # m x m
     except RuntimeError as e:
         raise RuntimeError(f"Cholesky decomposition failed for G: {e}")
-
+    
+    
     # Generate standard normal samples
     Z = torch.randn(n, m, device=A.device, dtype=sqrt_A.dtype)  # n x m
 
     # Transform samples using Kronecker structure to achieve Cov(Y) = A ⊗ G
+    #print("IN", sqrt_A, sqrt_G, Z)
     Y = sqrt_A @ Z @ sqrt_G.T  # n x m
     samples = Y.flatten()  # Flatten to (n * m,)
+   # print("samples", samples, q_mu)
 
     # Ensure samples have the same dtype as q_weight_mu
     #samples = samples.to(dtype=q_weight_mu.dtype)
-    
 
-
-    if samples.numel() != q_weight_mu.numel():
+    if samples.numel() != q_mu.numel():
         raise ValueError(
-            f"Dimension mismatch: samples ({samples.numel()}) vs q_weight_mu ({q_weight_mu.numel()})"
+            f"Dimension mismatch: samples ({samples.numel()}) vs q_weight_mu ({q_mu.numel()})"
         )
     
-    return samples + q_weight_mu
+    return samples + q_mu
 
 
 

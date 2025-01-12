@@ -9,7 +9,7 @@ from models.bayes_linear import BayesianLinear
 import time
 
 SUPPORTED_MODELS = [BayesianNN, MLP]
-params = {"count": 0, "beta1": 0.9, "lam": 1e-1}
+params = {"count": 0, "beta1": 1e-2, "lam": 1e-1}
 
 def update_G(module, grad_input, grad_output):
     """
@@ -35,12 +35,15 @@ def train(model: nn.Module,
     accs = []
 
     # hook to retrieve gradients for updating G in kfac layers
-    for name, layer in model.named_modules():
-       if isinstance(layer, BayesianLinear) and layer.kfac:
+    if model.approx == 'kfac' or model.approx == 'noisy-kfac':
+        for layer in model.layers:
             layer.register_full_backward_hook(update_G)
 
     
     model.train()
+
+    if model.approx == 'kfac':
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
     for epoch in range(num_epochs):
         running_loss = 0.
@@ -54,9 +57,7 @@ def train(model: nn.Module,
             outputs = model(inputs)
             loss_size = loss_fn(outputs, labels)
             loss_size.backward()
-
-            if model.kfac:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            #print("LOSS", loss_size.item())
 
             optimizer.step()
 
@@ -64,7 +65,7 @@ def train(model: nn.Module,
             running_loss += loss_size.item()
             running_acc += torch.sum(preds == labels).item()
 
-            if model.kfac:
+            if model.approx == 'noisy-kfac':
                 params['count'] += 1
 
         running_loss /= m

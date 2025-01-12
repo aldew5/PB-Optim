@@ -17,8 +17,8 @@ def get_bMNIST(batch_size):
     # Tranform into binary MNIST
     # Classes 0, ..., 4 maps to 0
     # Classes 5, ..., 9 maps to 1
-    trainset.targets = (trainset.targets >= 5).type(torch.float64)
-    testset.targets = (testset.targets >= 5).type(torch.float64)
+    trainset.targets = (trainset.targets >= 5).type(torch.float32)
+    testset.targets = (testset.targets >= 5).type(torch.float32)
     
     trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
     testloader = DataLoader(testset, batch_size=batch_size, shuffle=False)
