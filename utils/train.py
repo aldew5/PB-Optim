@@ -35,14 +35,14 @@ def train(model: nn.Module,
     accs = []
 
     # hook to retrieve gradients for updating G in kfac layers
-    if model.cat == 'kfac' or model.cat == 'noisy-kfac':
+    if model.approx == 'kfac' or model.approx == 'noisy-kfac':
         for layer in model.layers:
             layer.register_full_backward_hook(update_G)
 
     
     model.train()
 
-    if model.cat == 'noisy-kfac':
+    if model.approx == 'kfac':
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
     for epoch in range(num_epochs):
@@ -57,6 +57,7 @@ def train(model: nn.Module,
             outputs = model(inputs)
             loss_size = loss_fn(outputs, labels)
             loss_size.backward()
+            #print("LOSS", loss_size.item())
 
             optimizer.step()
 
@@ -64,7 +65,7 @@ def train(model: nn.Module,
             running_loss += loss_size.item()
             running_acc += torch.sum(preds == labels).item()
 
-            if model.cat == 'noisy-kfac':
+            if model.approx == 'noisy-kfac':
                 params['count'] += 1
 
         running_loss /= m
