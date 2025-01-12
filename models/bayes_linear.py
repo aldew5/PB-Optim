@@ -139,16 +139,13 @@ class BayesianLinear(nn.Module):
             # append a column of 1's for bias term
             #x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1)
             # update A
-            #print("Q WEIGHT MU", self.q_weight_mu)
             activations = x.clone().detach()
             self._A = activations.T @ activations / activations.size(0)
-            #print(torch.min(self._A), torch.max(self._A))
-
 
             p_sigma = torch.exp(p_log_sigma)
             q_bias_sigma = torch.exp(self.q_bias_log_sigma)
-            #print(activations)
-            #print(self._A, self._G)
+
+            # use means for forward
             weights = self.q_weight_mu #sample_from_kron_dist(self.q_weight_mu, self._A, self._G).view(self.out_features, self.in_features)
             bias = self.q_bias_mu #+ q_bias_sigma * torch.randn_like(q_bias_sigma)
 
