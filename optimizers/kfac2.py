@@ -9,19 +9,17 @@ class KFACOptimizer(optim.Optimizer):
     def __init__(self, 
             model,
             lr=0.01, 
-            damping=1e-1, 
+            damping=1e-2, 
+            beta2: float = 0.9,
             beta1: float = 0.9,
-            beta2: float = 0.99999,
-            weight_decay: float = 1e-4,
-            ess: int = 1e6
+            gamma: float = 1e-4,
         ):
         params = [p for p in model.parameters() if p.requires_grad]
         defaults = dict(lr=lr, 
                         damping=damping, 
                         beta1=beta1,
                         beta2=beta2, 
-                        weight_decay=weight_decay,
-                        ess=ess)
+                        gamma=gamma)
         super().__init__(params, defaults)
         self.model = model
 
@@ -36,52 +34,33 @@ class KFACOptimizer(optim.Optimizer):
         for layer in self.model.modules():
             if isinstance(layer, BayesianLinear):
                 A_inv, G_inv = self._compute_layer_inv(layer)
-                if (A_inv is None or G_inv is None): 
-                    continue
-                
+                assert(A_inv is not None and G_inv is not None)
+
                 for name, param in layer.named_parameters():
-                    print(A_inv, G_inv)
                     grad = param.grad
                     
                     if grad is None:
                         continue
-                    # only condition weight posterior updates
-                    if name[2] == 'w':
-                        old_grad = self.state[(layer.id, name)] if (layer.id, name) in self.state else torch.zeros_like(grad)
-                        grad_cur = self.defaults['beta1'] * old_grad + (1-self.defaults['beta1']) * grad
-                        self.state[(layer.id, name)] = grad_cur
-                        natural_grad = self._kron_mv(A_inv, G_inv, grad_cur.view(-1))
 
-                        param.data -= self.defaults['lr'] * natural_grad #+ self.defaults['weight_decay'] * param.data)
-                       
+                    if (layer.id, name) not in self.state:
+                        self.state[(layer.id, name)] = grad
+                        param.data -= self.defaults['lr'] * grad
+                        continue
 
-                    elif name[2] == 'b': # biases
-                        old_grad =  self.state[(layer.id, name)] if (layer.id, name) in self.state else torch.zeros_like(grad)
-                        grad_cur = self.defaults['beta1'] * old_grad + (1-self.defaults['beta1']) * grad
-                        self.state[(layer.id, name)] = grad_cur
+                    if name == 'q_bias_mu' or name == 'q_bias_log_sigma':
+                        param.data -= self.defaults['lr'] * grad
+                        continue
 
-                        param.data -= self.defaults['lr'] * grad_cur #+ self.defaults['weight_decay'] * param.data)
-                    else:
-                        raise ValueError(f"Unknown parameter name: {name}")
-                    
-        #old_sigma = self.state['p_log_sigma'] if 'p_log_sigma' in state else torch.zeros_like(self.p_lo)
-        if 'momentum' not in self.state:
-            self.state['momentum'] = torch.zeros_like(self.model.p_log_sigma.grad)
 
-        old_grad = self.state['momentum']
-        grad = self.model.p_log_sigma.grad
-        grad_cur = self.defaults['beta1'] * old_grad + grad * (1 - self.defaults['beta1']) 
-        self.state['momentum'] = grad_cur    
-    
-        self.model.p_log_sigma.data -= self.defaults['lr'] * grad_cur #+ self.defaults['weight_decay'] * self.model.p_log_sigma.data)
+                    old_grad = self.state[(layer.id, name)]
 
+                    # momentum-like updates of gradient with weight decay
+                    prod = G_inv @ grad @ A_inv
+                    grad_cur = self.defaults['beta2'] * old_grad + prod + self.defaults['gamma'] * param
+                    self.state[(layer.id, name)] = grad_cur
+
+                    param.data -= self.defaults['lr'] * grad_cur
         return loss
-    
-    def _smooth_update(self, old, new, decay):
-        """Apply an exponential moving average to smooth updates."""
-        if old is None:
-            return new
-        return decay * old + (1 - decay) * new
     
     def _compute_layer_inv(self, layer):
         """
@@ -94,27 +73,25 @@ class KFACOptimizer(optim.Optimizer):
         G_old = state.get((layer.id,"G"))
         A, G = layer._A, layer._G
 
-        #print(A, G)
-        if A is not None and G is not None:
-            A_new = self._smooth_update(
-                A_old.detach() if A_old is not None else None,
-                A.detach(),
-                self.defaults['beta2']
-                )
-            G_new = self._smooth_update(
-                G_old.detach() if G_old is not None else None,
-                G.detach(),
-                self.defaults['beta2']
-                )
+        if A_old is not None and G_old is not None:
+            A_new = (1 - self.defaults['beta1']) * A_old + self.defaults['beta1'] * A
+            G_new = (1 - self.defaults['beta1']) * G_old + self.defaults['beta1'] * G
 
+            # store updated per layer factors
             state[(layer.id,"A")] = A_new
             state[(layer.id,"G")] = G_new
-            #print(A_new, G_new)
+            
             A_inv = self._invert_via_eig(A_new, self.defaults['damping'])
             G_inv = self._invert_via_eig(G_new, self.defaults['damping'])
-            return A_inv, G_inv
+
         else:
-            return None, None
+            state[(layer.id,"A")] = A
+            state[(layer.id,"G")] = G
+
+            A_inv = self._invert_via_eig(A, self.defaults['damping'])
+            G_inv = self._invert_via_eig(G, self.defaults['damping'])
+
+        return A_inv, G_inv
         
     def _kron_mv(self, A, G, v):
         """
@@ -146,7 +123,7 @@ class KFACOptimizer(optim.Optimizer):
 
         #M_damped = M + damping * torch.eye(N, device=device, dtype=M.dtype)
         # Eigen-decomposition         
-        d, Q = torch.linalg.eigh(M + damping* torch.eye(N, device=device, dtype=M.dtype), UPLO='U')
+        d, Q = torch.linalg.eigh(M + damping * torch.eye(N, device=device, dtype=M.dtype), UPLO='U')
         d_clamped = torch.clamp(d, min=eps)
         inv_d = 1.0 / d_clamped
         
