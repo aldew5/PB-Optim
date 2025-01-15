@@ -2,6 +2,7 @@
 **/__pycache__/
 data/raw
 checkpoints
+runs
 .venv
 *.pt
 *.pkl
