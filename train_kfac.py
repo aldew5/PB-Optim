@@ -1,4 +1,3 @@
-'''Train CIFAR10/CIFAR100 with PyTorch.'''
 import argparse
 import os
 from optimizers.kfac3 import KFACOptimizer
