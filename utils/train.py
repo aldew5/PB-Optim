@@ -35,9 +35,9 @@ def train(model: nn.Module,
     accs = []
 
     # hook to retrieve gradients for updating G in kfac layers
-    if model.approx == 'kfac' or model.approx == 'noisy-kfac':
-        for layer in model.layers:
-            layer.register_full_backward_hook(update_G)
+    #if model.approx == 'kfac' or model.approx == 'noisy-kfac':
+    #    for layer in model.layers:
+     #       layer.register_full_backward_hook(update_G)
 
     
     model.train()
@@ -57,7 +57,6 @@ def train(model: nn.Module,
             outputs = model(inputs)
             loss_size = loss_fn(outputs, labels)
             loss_size.backward()
-            #print("LOSS", loss_size.item())
 
             optimizer.step()
 
@@ -74,7 +73,7 @@ def train(model: nn.Module,
         accs.append(running_acc)
         
         scheduler.step()
-
+        print("KL", outputs[1])
         print('Epoch: {:04d}'.format(epoch+1),
             'loss_train: {:.4f}'.format(running_loss),
             'acc_train: {:.4f}'.format(running_acc),

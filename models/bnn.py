@@ -49,7 +49,7 @@ class BayesianNN(nn.Module):
 
     def forward(self, x, p_log_sigma=None):
         if p_log_sigma is None:
-            p_log_sigma = p_log_sigma or self.p_log_sigma
+            p_log_sigma = self.p_log_sigma
             
         x = x.view(-1, self.in_features)
 

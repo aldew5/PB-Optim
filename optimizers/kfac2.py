@@ -1,27 +1,36 @@
 import torch
 import torch.optim as optim
 from models.bayes_linear import BayesianLinear
+import math
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
 class KFACOptimizer(optim.Optimizer):
+    """
+    Using block diagonal kfactored approximation of the Fisher
+
+    lam: damping used in inversion of kfactors
+    """
     def __init__(self, 
             model,
             lr=0.01, 
-            damping=1e-2, 
-            beta2: float = 0.9,
-            beta1: float = 0.9,
-            gamma: float = 1e-4,
+            lam=1e-2, 
+            beta2: float=0.9,
+            beta1: float=0.9,
+            weight_decay=1e-4
         ):
         params = [p for p in model.parameters() if p.requires_grad]
         defaults = dict(lr=lr, 
-                        damping=damping, 
+                        lam=lam, 
                         beta1=beta1,
-                        beta2=beta2, 
-                        gamma=gamma)
+                        beta2=beta2,
+                        weight_decay=weight_decay)
         super().__init__(params, defaults)
         self.model = model
+        self.gamma = math.sqrt(lam + lr)
+        # count iterations
+        self.k = 1
 
         # for each layer
         self.state = {}
@@ -45,21 +54,19 @@ class KFACOptimizer(optim.Optimizer):
                     if (layer.id, name) not in self.state:
                         self.state[(layer.id, name)] = grad
                         param.data -= self.defaults['lr'] * grad
-                        continue
 
-                    if name == 'q_bias_mu' or name == 'q_bias_log_sigma':
+                    elif name == 'q_bias_mu' or name == 'q_bias_log_sigma':
                         param.data -= self.defaults['lr'] * grad
-                        continue
+                        
+                    else:
+                        old_grad = self.state[(layer.id, name)]
 
+                        # momentum-like updates of gradient with weight decay
+                        prod = G_inv @ grad @ A_inv
+                        grad_cur = self.defaults['beta2'] * old_grad + prod + self.defaults['weight_decay'] * param
+                        self.state[(layer.id, name)] = grad_cur
 
-                    old_grad = self.state[(layer.id, name)]
-
-                    # momentum-like updates of gradient with weight decay
-                    prod = G_inv @ grad @ A_inv
-                    grad_cur = self.defaults['beta2'] * old_grad + prod + self.defaults['gamma'] * param
-                    self.state[(layer.id, name)] = grad_cur
-
-                    param.data -= self.defaults['lr'] * grad_cur
+                        param.data -= self.defaults['lr'] * grad_cur
         return loss
     
     def _compute_layer_inv(self, layer):
@@ -67,10 +74,10 @@ class KFACOptimizer(optim.Optimizer):
         Updates layer state with new values of A, G. Returns A_inv and G_inv
         whose product is the kronecker approximation of the inverse hessian.
         """
-        state = self.state
-        # cnt indexes the layer
-        A_old = state.get((layer.id,"A"))
-        G_old = state.get((layer.id,"G"))
+        # retrieve kronecker approximations for the current layer
+        # NOTE: we are using block approximations A_ii, G_ii for layer i
+        A_old = self.state.get((layer.id,"A"))
+        G_old = self.state.get((layer.id,"G"))
         A, G = layer._A, layer._G
 
         if A_old is not None and G_old is not None:
@@ -78,31 +85,34 @@ class KFACOptimizer(optim.Optimizer):
             G_new = (1 - self.defaults['beta1']) * G_old + self.defaults['beta1'] * G
 
             # store updated per layer factors
-            state[(layer.id,"A")] = A_new
-            state[(layer.id,"G")] = G_new
+            self.state[(layer.id,"A")] = A_new
+            self.state[(layer.id,"G")] = G_new
+
+            # see grosse et al for calculation
+            pi = torch.sqrt((torch.trace(A_new)/(A_new.size(0) + 1))/(torch.trace(G_new)/(G_new.size(0))))
+            A_new_damped = A_new + pi * self.gamma * torch.eye(A_new.size(0), device=A_new.device)
+            G_new_damped = G_new + 1.0/pi * self.gamma * torch.eye(G_new.size(0), device=G_new.device)
+
             
-            A_inv = self._invert_via_eig(A_new, self.defaults['damping'])
-            G_inv = self._invert_via_eig(G_new, self.defaults['damping'])
+            A_inv = self._invert_via_eig(A_new_damped)
+            G_inv = self._invert_via_eig(G_new_damped)
 
+        # first iteration
         else:
-            state[(layer.id,"A")] = A
-            state[(layer.id,"G")] = G
+            self.state[(layer.id,"A")] = A
+            self.state[(layer.id,"G")] = G
 
-            A_inv = self._invert_via_eig(A, self.defaults['damping'])
-            G_inv = self._invert_via_eig(G, self.defaults['damping'])
+            pi = torch.sqrt((torch.trace(A)/(A.size(0) + 1))/(torch.trace(G)/(G.size(0))))
+            A_damped = A + pi * self.gamma * torch.eye(A.size(0), device=A.device)
+            G_damped = G + 1.0/pi * self.gamma * torch.eye(G.size(0), device=G.device)
+
+            A_inv = self._invert_via_eig(A_damped)
+            G_inv = self._invert_via_eig(G_damped)
 
         return A_inv, G_inv
         
-    def _kron_mv(self, A, G, v):
-        """
-        Computes (A \oplus G) v where \oplus is the kronecker product. 
-        It's more efficient than first computing the kronecker product
-        """
-        m, n = A.shape[0], G.shape[0]
-        v = v.view(n, m)
-        return (G @ v) @ A.t()
     
-    def _invert_via_eig(self, M, damping=1e-4, eps=1e-10):
+    def _invert_via_eig(self, M, eps=1e-8):
         """
         Inverts a symmetric matrix M using its eigen-decomposition:
         M = Q diag(d) Q^T
@@ -118,12 +128,9 @@ class KFACOptimizer(optim.Optimizer):
         Returns:
             torch.Tensor: Inverse of (M + damping*I).
         """
-        device = M.device
-        N = M.size(0)
 
-        #M_damped = M + damping * torch.eye(N, device=device, dtype=M.dtype)
         # Eigen-decomposition         
-        d, Q = torch.linalg.eigh(M + damping * torch.eye(N, device=device, dtype=M.dtype), UPLO='U')
+        d, Q = torch.linalg.eigh(M, UPLO='U')
         d_clamped = torch.clamp(d, min=eps)
         inv_d = 1.0 / d_clamped
         

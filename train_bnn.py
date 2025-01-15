@@ -13,7 +13,7 @@ from utils.seed import set_seed
 from utils.pac_bayes_loss import pac_bayes_loss
 from utils.train import train
 from utils.evaluate import evaluate_BNN
-from optimizers.kfac2 import KFACOptimizer
+from optimizers.kfac3 import KFACOptimizer
 from optimizers.noisy_kfac import NoisyKFAC
 
 #from optimizers.ivon import *
@@ -51,7 +51,7 @@ delta_prime = 0.01
 
 # Training
 #optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
-optimizer = KFACOptimizer(bnn_model, lr=0.01)
+optimizer = KFACOptimizer(bnn_model, lr=learning_rate)
 #print(list(bnn_model.parameters()))
 #optimizer = NoisyKFAC(bnn_model, lr=1e-3)
 #optimizer = optimizer = SINGD(bnn_model, lr=1e-3, warn_unsupported=False)
@@ -67,7 +67,6 @@ if not LOAD_DATA:
     N_samples = 10
     plot = True
     save_plot = False
-    # add delta' = 0.01 from 
     evaluate_BNN(bnn_model, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, bnn_losses, bnn_accs, plot=plot, save_plot=save_plot)
 else:
     params = torch.load('./checkpoints/bnn/baseline.pt', weights_only=True)
