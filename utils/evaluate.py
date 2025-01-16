@@ -45,6 +45,7 @@ def evaluate_MLP(model: MLP, testloader, device, losses: list[float] = None, acc
 def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, losses: list[float] = None, 
                  accs: list[float] = None, plot=False, save_plot=False):
     model.eval()
+    model.flag = 'eval'
     
     # discretize prior std
     j = b * (torch.log(c) - 2 * model.p_log_sigma)

@@ -78,6 +78,8 @@ class BayesianLinear(nn.Module):
             self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1)) 
             self.p_mu = nn.Parameter(torch.cat((init_p["weight"], init_p['bias'].unsqueeze(1)), dim=1), requires_grad=False)  
             self.q_bias_mu = None
+            self.training = True
+            self.prev_kl = None
 
         else:
             # weight means (mu) and log-std (log_sigma)
@@ -97,7 +99,7 @@ class BayesianLinear(nn.Module):
             torch.log(p_sigma) - torch.log(q_sigma) + (q_sigma**2 + (p_mu - q_mu)**2) / (2 * p_sigma**2) - 0.5
         )
 
-    def forward(self, x, p_log_sigma, T_stats=20, beta_1=0.9):
+    def forward(self, x, p_log_sigma, flag, T_stats=20, beta_1=0.9):
         """
             params:
                 - k: current iteration number
@@ -123,7 +125,7 @@ class BayesianLinear(nn.Module):
 
             bias = self.q_bias_mu + q_bias_sigma * torch.randn_like(q_bias_sigma)
 
-            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu)
+            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu, flag)
             kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
             kl = kl_weight + kl_bias
 
@@ -153,7 +155,7 @@ class BayesianLinear(nn.Module):
             weights = self.q_mu #sample_from_kron_dist(self.q_weight_mu, self._A, self._G).view(self.out_features, self.in_features)
             #bias = self.q_bias_mu #+ q_bias_sigma * torch.randn_like(q_bias_sigma)
 
-            kl = self.kl_divergence_kfac_weight(self.p_mu, p_sigma, self.q_mu)
+            kl = self.kl_divergence_kfac_weight(self.p_mu, p_sigma, self.q_mu, flag)
             #kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
             #kl = kl_weight + kl_bias
 
@@ -177,7 +179,7 @@ class BayesianLinear(nn.Module):
 
         return outputs, kl
     
-    def kl_divergence(self, p_log_sigma=None) -> float:
+    def kl_divergence(self, p_log_sigma=None, flag="train") -> float:
         """Returns KL divergence between prior and posterior distributions.
 
         Args:
@@ -200,14 +202,14 @@ class BayesianLinear(nn.Module):
             p_sigma = torch.exp(p_log_sigma)
             #q_bias_sigma = torch.exp(self.q_bias_log_sigma)
 
-            kl = self.kl_divergence_kfac_weight(self.p_mu, p_sigma, self.q_mu)
+            kl = self.kl_divergence_kfac_weight(self.p_mu, p_sigma, self.q_mu, flag)
             #kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
             #kl = kl_weight + kl_bias
             #print(kl_weight, kl_bias) 
         
         return kl
     
-    def kl_divergence_kfac_weight(self, p_mu, p_sigma, q_weight_mu, epsilon=1e-3):
+    def kl_divergence_kfac_weight(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-3):
         """
         Compute the KL divergence between a diagonal Gaussian prior and a Kronecker-factored Gaussian posterior.
 
@@ -223,6 +225,11 @@ class BayesianLinear(nn.Module):
         # Retrieve the KFAC blocks from this class
         A, G = self._A, self._G
         n, m = A.shape[0], G.shape[0]
+
+        trace_A = torch.trace(A)
+        trace_G = torch.trace(G)
+        A = A / (trace_A + epsilon)
+        G = G / (trace_G + epsilon)
         
         # Add a small epsilon on the diagonal to ensure positive-definiteness
         A = A + torch.eye(n, device=A.device) * epsilon
@@ -257,7 +264,7 @@ class BayesianLinear(nn.Module):
         # 3) Remaining terms for KL divergence
         # ----------------------------------------------------------------
         # log(det(prior)) = n * log(p_sigma^2)
-        log_det_prior = n * torch.log(p_sigma**2)
+        log_det_prior = n * m* torch.log(p_sigma**2)
         
         # trace_term = trace(A) * trace(G) / p_sigma^2
         # but trace(A) = sum(dA), trace(G) = sum(dG)
@@ -279,11 +286,17 @@ class BayesianLinear(nn.Module):
         # 0.5 * ((log_det_A + n*log_det_G - log_det_prior - m*n) 
         #        + trace_term + quadratic_term)
         kl = 0.5 * (
-            (log_det_A + n * log_det_G - log_det_prior - m * n)
+            (m*log_det_A + n * log_det_G - log_det_prior - m * n)
             + trace_term
             + quadratic_term
         )
-
+        if kl < 0:
+            kl = 0
+            if flag == 'eval': kl = self.prev_kl
+            self.training = False
+        else:
+            self.prev_kl = kl
+            
         return kl
 
 

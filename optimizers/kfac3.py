@@ -53,6 +53,7 @@ class KFACOptimizer(optim.Optimizer):
         self.TInv = TInv
 
     def _save_input(self, module, input):
+        if not module.training: return None
         if torch.is_grad_enabled() and self.steps % self.TCov == 0:
             #print(input[0].data, input[0].data.size())
             aa = self.CovAHandler(input[0].data, module)
@@ -63,6 +64,7 @@ class KFACOptimizer(optim.Optimizer):
             update_running_stat(aa, self.m_aa[module], self.stat_decay)
 
     def _save_grad_output(self, module, grad_input, grad_output):
+        if not module.training: return None
         # Accumulate statistics for Fisher matrices
         if self.acc_stats and self.steps % self.TCov == 0:
             gg = self.CovGHandler(grad_output[0].data, module, self.batch_averaged)
@@ -153,6 +155,7 @@ class KFACOptimizer(optim.Optimizer):
         # do kl clip
         vg_sum = 0
         for m in self.modules:
+            if not m.training: continue
             v = updates[m]
             vg_sum += (v[0] * m.q_mu.grad.data * lr ** 2).sum().item()
             if m.q_bias_mu is not None:
@@ -160,6 +163,7 @@ class KFACOptimizer(optim.Optimizer):
         nu = 1.0 if vg_sum == 0 else min(1.0, math.sqrt(self.kl_clip / vg_sum)) 
 
         for m in self.modules:
+            if not m.training: continue
             v = updates[m]
             m.q_mu.grad.data.copy_(v[0])
             m.q_mu.grad.data.mul_(nu)
@@ -209,6 +213,7 @@ class KFACOptimizer(optim.Optimizer):
         updates = {}
         for m in self.modules:
             #print(m)
+            if not m.training: continue
             classname = m.__class__.__name__
             if self.steps % self.TInv == 0:
                 self._update_inv(m)

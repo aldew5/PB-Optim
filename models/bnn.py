@@ -45,6 +45,7 @@ class BayesianNN(nn.Module):
         self.bl3 = BayesianLinear(hidden_features, 1, init_p_weights[2], init_q_weights[2], 3, approx=approx)
 
         self.layers = [self.bl1, self.bl2, self.bl3]
+        self.flag = "train" # updated for eval
 
 
     def forward(self, x, p_log_sigma=None):
@@ -53,13 +54,13 @@ class BayesianNN(nn.Module):
             
         x = x.view(-1, self.in_features)
 
-        x, kl1 = self.bl1(x, p_log_sigma)
+        x, kl1 = self.bl1(x, p_log_sigma, self.flag)
         x = F.relu(x)
 
-        x, kl2 = self.bl2(x, p_log_sigma)
+        x, kl2 = self.bl2(x, p_log_sigma, self.flag)
         x = F.relu(x)
 
-        x, kl3 = self.bl3(x, p_log_sigma)
+        x, kl3 = self.bl3(x, p_log_sigma, self.flag)
         
         #print(x, kl1, kl2, kl3)
         return x, kl1 + kl2 + kl3, p_log_sigma
@@ -69,6 +70,6 @@ class BayesianNN(nn.Module):
             p_log_sigma = self.p_log_sigma
 
         
-        return self.bl1.kl_divergence(p_log_sigma=p_log_sigma) + self.bl2.kl_divergence(p_log_sigma=p_log_sigma) +\
-                self.bl3.kl_divergence(p_log_sigma=p_log_sigma)
+        return self.bl1.kl_divergence(p_log_sigma=p_log_sigma, flag=self.flag) + self.bl2.kl_divergence(p_log_sigma=p_log_sigma, flag=self.flag) +\
+                self.bl3.kl_divergence(p_log_sigma=p_log_sigma, flag=self.flag)
      
