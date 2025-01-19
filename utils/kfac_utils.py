@@ -53,68 +53,177 @@ def compute_inv(M, damping=1e-4, eps=1e-10):
 
         return M_inv
 
+
 import torch
+
+def sample_from_matrix_normal(q_mu, A, G, num_samples=1):
+    """
+    Sample from N(q_mu, A^{-1} ⊗ G^{-1}) using eigendecomposition to compute inverses.
+
+    Parameters:
+    - q_mu: torch.Tensor, shape (n, p), the mean matrix.
+    - A: torch.Tensor, shape (n, n), the row covariance matrix (A, not its inverse).
+    - G: torch.Tensor, shape (p, p), the column covariance matrix (G, not its inverse).
+    - num_samples: int, the number of samples to generate (default: 1).
+
+    Returns:
+    - samples: torch.Tensor, shape (num_samples, n, p), the sampled matrices.
+    """
+    n, p = q_mu.shape
+
+    # Eigendecomposition of A and G
+    eigvals_A, eigvecs_A = torch.linalg.eigh(A)
+    eigvals_G, eigvecs_G = torch.linalg.eigh(G)
+
+    # Compute A^{-1/2} and G^{-1/2}
+    A_inv_sqrt = eigvecs_A @ torch.diag(1.0 / torch.sqrt(eigvals_A)) @ eigvecs_A.T
+    G_inv_sqrt = eigvecs_G @ torch.diag(1.0 / torch.sqrt(eigvals_G)) @ eigvecs_G.T
+
+    # Generate standard normal samples
+    z = torch.randn(num_samples, n, p)  # Shape: (num_samples, n, p)
+
+    # Apply row covariance structure using A_inv_sqrt
+    z = torch.einsum('ij,bjk->bik', A_inv_sqrt, z)  # Shape: (num_samples, n, p)
+
+    # Apply column covariance structure using G_inv_sqrt
+    samples = torch.einsum('bij,jk->bik', z, G_inv_sqrt.T)  # Shape: (num_samples, n, p)
+
+    # Add the mean q_mu
+    samples += q_mu
+
+    return samples
+
 
 def sample_from_kron_dist(q_mu, A, G, epsilon=1e-2):
     """
-    Sample from a multivariate normal distribution with covariance A ⊗ G
-    without explicitly forming the Kronecker product.
-
+    Sample from a multivariate normal distribution with covariance A^{-1} ⊗ G^{-1}.
+    
     Args:
-        q_weight_mu (torch.Tensor): Mean vector of size (m * n,).
+        q_mu (torch.Tensor): Mean vector of size (m * n,).
         A (torch.Tensor): Covariance matrix A (n x n).
         G (torch.Tensor): Covariance matrix G (m x m).
+        epsilon (float): Regularization constant to ensure positive-definiteness.
+    
+    Returns:
+        torch.Tensor: Sample of size (m * n,).
+    """
+    if q_mu.ndim > 1:
+        q_mu = q_mu.view(-1)
+    
+    n = A.shape[0]
+    m = G.shape[0]
+    
+    with torch.no_grad():
+        # Regularize A and G
+        A = A + epsilon * torch.eye(n, device=A.device)
+        G = G + epsilon * torch.eye(m, device=G.device)
+        
+        # Eigen decomposition and inverse square root
+        dA, QA = torch.linalg.eigh(A)
+        dG, QG = torch.linalg.eigh(G)
+        
+        dA_inv = 1.0 / torch.clamp(dA, min=epsilon)
+        dG_inv = 1.0 / torch.clamp(dG, min=epsilon)
+        
+        sqrt_A_inv = QA @ torch.diag(torch.sqrt(dA_inv)) @ QA.T
+        sqrt_G_inv = QG @ torch.diag(torch.sqrt(dG_inv)) @ QG.T
+        
+        # Generate samples
+        Z = torch.randn(n, m, device=A.device)
+        Y = sqrt_A_inv @ Z @ sqrt_G_inv.T
+        samples = Y.flatten() + q_mu
+        
+        # Ensure sample dimensions match
+        if samples.numel() != q_mu.numel():
+            raise ValueError(
+                f"Dimension mismatch: samples ({samples.numel()}) vs q_mu ({q_mu.numel()})"
+            )
+    
+    return samples
+
+
+
+
+def sample_from_kron_dist_fast(q_mu, A, G, epsilon=10):
+    """
+    Sample from a multivariate normal distribution with covariance A^{-1} ⊗ G^{-1},
+    where we interpret the final (m*n)-dim vector as an (m x n) matrix.
+
+    Args:
+        q_mu (torch.Tensor): Mean vector of size (m * n,).
+        A (torch.Tensor): Covariance matrix A, size (n x n).
+        G (torch.Tensor): Covariance matrix G, size (m x m).
         epsilon (float): Regularization constant to ensure positive-definiteness.
 
     Returns:
         torch.Tensor: Sample of size (m * n,).
     """
-    #print("Q MU", q_mu)
-    # Ensure q_weight_mu is a 1D tensor
+
+    # Flatten mean if necessary
     if q_mu.ndim > 1:
         q_mu = q_mu.view(-1)
 
-    n = A.shape[0]
-    m = G.shape[0]
+    # Sizes
+    m = G.shape[0]  # row dimension
+    n = A.shape[0]  # column dimension
 
+    # Regularize A and G for numerical stability
+    A_reg = A + epsilon * torch.eye(n, device=A.device)
+    G_reg = G + epsilon * torch.eye(m, device=G.device)
+    #print(A_reg.diagonal(), G_reg.diagonal())
 
-    # Regularize A and G to ensure positive definiteness
-    A = A + max(A.max() * epsilon, epsilon) * torch.eye(n, device=A.device, dtype=A.dtype)
-    G = G + max(G.max() * epsilon, epsilon) * torch.eye(m, device=G.device, dtype=G.dtype)
-    #A = A / A.norm()
-    #G = G / G.norm()        
-    #print(A, G, torch.linalg.eigvals(A))
+    # Eigendecomposition of A and G
+    dA, QA = torch.linalg.eigh(A_reg)
+    dG, QG = torch.linalg.eigh(G_reg)
 
-    # Compute Cholesky factors
-    try:
-        sqrt_A = torch.linalg.cholesky(A) # n x n
-    except RuntimeError as e:
-        raise RuntimeError(f"Cholesky decomposition failed for A: {e}")
+    # Inverse square roots of eigenvalues
+    dA_inv_sqrt = 1.0 / torch.sqrt(torch.clamp(dA, min=epsilon))
+    dG_inv_sqrt = 1.0 / torch.sqrt(torch.clamp(dG, min=epsilon))
 
-    try:
-        sqrt_G = torch.linalg.cholesky(G)  # m x m
-    except RuntimeError as e:
-        raise RuntimeError(f"Cholesky decomposition failed for G: {e}")
-    
-    
-    # Generate standard normal samples
-    Z = torch.randn(n, m, device=A.device, dtype=sqrt_A.dtype)  # n x m
+    # Draw a standard normal sample of shape (m x n) 
+    # because we want the final shape to be (m x n).
+    Z = torch.randn(m * n, device=A.device).view(m, n)
 
-    # Transform samples using Kronecker structure to achieve Cov(Y) = A ⊗ G
-    #print("IN", sqrt_A, sqrt_G, Z)
-    Y = sqrt_A @ Z @ sqrt_G.T  # n x m
-    samples = Y.flatten()  # Flatten to (n * m,)
-   # print("samples", samples, q_mu)
+    # Build the transformation so that Cov(vec(Z_transformed)) = A^-1 ⊗ G^-1.
+    #
+    # Recall that for an (m x n) matrix M:
+    #   vec(QG * M * QA^T) = (QA ⊗ QG) * vec(M),
+    # and each QG, QA is orthogonal, so the eigen decomposition
+    #   G = QG diag(dG) QG^T => G^-1 = QG diag(1/dG) QG^T
+    #   A = QA diag(dA) QA^T => A^-1 = QA diag(1/dA) QA^T.
+    #
+    # To get G^-1 for rows and A^-1 for columns, we do:
+    #   Z_transformed = QG (diag(dG_inv_sqrt) Z diag(dA_inv_sqrt)) QA^T
+    #
+    # But for simplicity, we often multiply each piece step by step:
+    #
+    #   diag(dG_inv_sqrt) @ Z => multiply each row by sqrt of 1/dG (since Z is (m x n))
+    #   QG @ (...) => rotate by QG
+    #   (... ) @ diag(dA_inv_sqrt) => multiply each column by sqrt of 1/dA
+    #   (... ) @ QA^T => rotate by QA
+    #
+    # The net result is that vec(Z_transformed) has covariance A^-1 ⊗ G^-1.
+    #
+    # A quick route is:  Z_transformed = QG * (diag(dG_inv_sqrt) * Z * diag(dA_inv_sqrt)) * QA^T
 
-    # Ensure samples have the same dtype as q_weight_mu
-    #samples = samples.to(dtype=q_weight_mu.dtype)
+    Z_row_scaled = torch.diag(dG_inv_sqrt) @ Z        # shape (m x n)
+    Z_left = QG @ Z_row_scaled                        # shape (m x n)
+    Z_col_scaled = Z_left @ torch.diag(dA_inv_sqrt)   # shape (m x n)
+    Z_transformed = Z_col_scaled @ QA.T               # shape (m x n)
 
+    # Flatten and add mean
+    samples = Z_transformed.flatten() + q_mu
+
+    # Safety check
     if samples.numel() != q_mu.numel():
         raise ValueError(
-            f"Dimension mismatch: samples ({samples.numel()}) vs q_weight_mu ({q_mu.numel()})"
+            f"Dimension mismatch: samples ({samples.numel()}) vs q_mu ({q_mu.numel()})"
         )
-    
-    return samples + q_mu
+
+    #print(samples.diagonal())
+    return samples
+
+
 
 
 
@@ -143,11 +252,6 @@ def sample_mvnd(mean, row_cov, col_cov):
     # Transform the random matrix using the Kronecker structure
     sampled_matrix = mean + L_row @ Z @ L_col.T
     return sampled_matrix
-
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 
 def try_contiguous(x):
