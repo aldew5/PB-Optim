@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from utils.kfac_utils import *
+from utils.sampling import *
 import math
 
 
@@ -48,6 +49,7 @@ class BayesianLinear(nn.Module):
         # for use in optimizer. will store gradients and A, G for momentum updates
         self.id = id
 
+        # TODO: does not currently work
         if self.approx == 'noisy-kfac':
             # F \approx A \otimes G
             self._A = (init_value * torch.eye(self.in_features)).double() #+ regularization * torch.eye(self.in_features)
@@ -89,16 +91,6 @@ class BayesianLinear(nn.Module):
             self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))  
             
 
-    @staticmethod
-    def kl_normal_diag(p_mu, p_sigma, q_mu, q_sigma):
-        """
-        Compute KL divergence between two normal distributions.
-            
-        Inputs: p is the posterior, q is the prior
-        """
-        return torch.sum(
-            torch.log(p_sigma) - torch.log(q_sigma) + (q_sigma**2 + (p_mu - q_mu)**2) / (2 * p_sigma**2) - 0.5
-        )
 
     def forward(self, x, p_log_sigma, flag, T_stats=20, beta_1=0.9):
         """
@@ -126,7 +118,7 @@ class BayesianLinear(nn.Module):
 
             bias = self.q_bias_mu + q_bias_sigma * torch.randn_like(q_bias_sigma)
 
-            kl_weight = self.kl_divergence_kfac_weight(self.p_weight_mu, p_sigma, self.q_weight_mu, flag)
+            kl_weight = self.kl_divergence_kfac(self.p_weight_mu, p_sigma, self.q_weight_mu, flag)
             kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
             kl = kl_weight + kl_bias
 
@@ -142,33 +134,18 @@ class BayesianLinear(nn.Module):
                 
             self.k += 1
         
+        # kfactored posterior approximation
         elif self.approx == 'kfac':
             # append a column of 1's for bias term
             x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1)
-            # update A
-            #activations = x.clone().detach()
-            #self._A = activations.T @ activations / activations.size(0)
-
+            # prior std
             p_sigma = torch.exp(p_log_sigma)
-            #q_bias_sigma = torch.exp(self.q_bias_log_sigma)
 
-            # use means for forward
-            weights = self.q_mu
-
-            #weights = torch.zeros_like(self.q_mu)
+            # sample weights from posterior
             weights = sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
-            #print(weights.diagonal())
-            #print(weights)
-            #print('weights', weights)
-            #bias = self.q_bias_mu #+ q_bias_sigma * torch.randn_like(q_bias_sigma)
-
-            kl = self.kl_divergence_kfac_weight(self.p_mu, p_sigma, self.q_mu, flag)
-            #kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
-            #kl = kl_weight + kl_bias
-            #tensor(
+            # compute KL between kfactored posterior and diagonal prior
+            kl = self.kl_divergence_kfac(self.p_mu, p_sigma, self.q_mu, flag)
             outputs = F.linear(x, weights, torch.zeros(self.out_features))
-            #print("WEIGHTS", weights.size())
-            #outputs = x @ weights.T
 
         # diagonal approximation
         else:
@@ -208,16 +185,11 @@ class BayesianLinear(nn.Module):
             kl = kl_weight + kl_bias
         else:
             p_sigma = torch.exp(p_log_sigma)
-            #q_bias_sigma = torch.exp(self.q_bias_log_sigma)
-
-            kl = self.kl_divergence_kfac_weight(self.p_mu, p_sigma, self.q_mu, flag)
-            #kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
-            #kl = kl_weight + kl_bias
-            #print(kl_weight, kl_bias) 
+            kl = self.kl_divergence_kfac(self.p_mu, p_sigma, self.q_mu, flag)
         
         return kl
     
-    def kl_divergence_kfac_weight(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-3):
+    def kl_divergence_kfac(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-3):
         """
         Compute the KL divergence between a diagonal Gaussian prior and a Kronecker-factored Gaussian posterior.
 
@@ -239,14 +211,10 @@ class BayesianLinear(nn.Module):
         A = A / (trace_A + epsilon)
         G = G / (trace_G + epsilon)
         
-        # Add a small epsilon on the diagonal to ensure positive-definiteness
         A = A + torch.eye(n, device=A.device) * epsilon
         G = G + torch.eye(m, device=G.device) * epsilon
         
-        # ----------------------------------------------------------------
-        # 1) Eigendecomposition of A
-        #    A = Q_A @ diag(dA) @ Q_A^T,   with dA = eigenvalues, Q_A = eigenvectors
-        # ----------------------------------------------------------------
+        # eigendecompositions
         dA, Q_A = torch.linalg.eigh(A)  # or torch.symeig(A, eigenvectors=True)
         dA = torch.clamp(dA, min=epsilon)  # Ensure eigenvalues are positive
         # Log-determinant of A = sum(log(dA))
@@ -255,10 +223,6 @@ class BayesianLinear(nn.Module):
         inv_dA = 1.0 / dA
         A_inv = Q_A @ torch.diag(inv_dA) @ Q_A.T
         
-        # ----------------------------------------------------------------
-        # 2) Eigendecomposition of G
-        #    G = Q_G @ diag(dG) @ Q_G^T
-        # ----------------------------------------------------------------
         dG, Q_G = torch.linalg.eigh(G)  # or torch.symeig(G, eigenvectors=True)
         dG = torch.clamp(dG, min=epsilon)
 
@@ -268,9 +232,7 @@ class BayesianLinear(nn.Module):
         inv_dG = 1.0 / dG
         G_inv = Q_G @ torch.diag(inv_dG) @ Q_G.T
         
-        # ----------------------------------------------------------------
-        # 3) Remaining terms for KL divergence
-        # ----------------------------------------------------------------
+
         # log(det(prior)) = n * log(p_sigma^2)
         log_det_prior = n * m* torch.log(p_sigma**2)
         
@@ -286,10 +248,7 @@ class BayesianLinear(nn.Module):
         # Quadratic term = trace(G_inv @ (delta_mu @ A_inv @ delta_mu^T))
         inside = delta_mu_reshaped @ A_inv @ delta_mu_reshaped.T
         quadratic_term = torch.trace(G_inv @ inside)
-        
-        # ----------------------------------------------------------------
-        # 4) Put it all together
-        # ----------------------------------------------------------------
+
         # This matches the original formula:
         # 0.5 * ((log_det_A + n*log_det_G - log_det_prior - m*n) 
         #        + trace_term + quadratic_term)
@@ -298,45 +257,27 @@ class BayesianLinear(nn.Module):
             + trace_term
             + quadratic_term
         )
+
+        # handling unstable KL 
         if kl < 0:
             kl = 0
             if flag == 'eval': kl = self.prev_kl
             self.training = False
-            #print("FALSE")
         else:
             self.prev_kl = kl
             
         return kl
-
-
     
-    def kl_divergence_kfac_bias(self, p_bias_mu, p_sigma, q_bias_mu, q_bias_cov):
+    def kl_normal_diag(p_mu, p_sigma, q_mu, q_sigma):
         """
-        Compute the KL divergence between a diagonal Gaussian prior and a full covariance Gaussian posterior for biases.
-
-        Args:
-            p_bias_mu (torch.Tensor): Mean vector of the diagonal prior (m,).
-            p_sigma (float): Standard deviation of the diagonal prior (scalar).
-            q_bias_mu (torch.Tensor): Mean vector of the posterior (m,).
-            q_bias_cov (torch.Tensor): Covariance matrix of the posterior (m x m).
-
-        Returns:
-            float: KL divergence D_KL(prior || posterior).
+        Compute KL divergence between two normal distributions.
+            
+        Inputs: p is the posterior, q is the prior
         """
-        m = p_bias_mu.shape[0]
-
-        log_det_q = torch.logdet(q_bias_cov)
-        log_det_prior = m * torch.log(p_sigma**2) 
-        trace_term = torch.trace(q_bias_cov) / p_sigma**2
-
-        delta_mu = q_bias_mu - p_bias_mu
-        quadratic_term = delta_mu.T @ torch.linalg.inv(q_bias_cov) @ delta_mu / p_sigma**2
-
-        kl = 0.5 * (
-            log_det_q - log_det_prior - m + trace_term + quadratic_term
+        return torch.sum(
+            torch.log(p_sigma) - torch.log(q_sigma) + (q_sigma**2 + (p_mu - q_mu)**2) / (2 * p_sigma**2) - 0.5
         )
 
-        return kl
     
     def _noisy_inversion(self, p_log_sigma, batch_size, damping=1e-2):
         """

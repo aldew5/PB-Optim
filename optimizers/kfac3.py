@@ -55,7 +55,6 @@ class KFACOptimizer(optim.Optimizer):
     def _save_input(self, module, input):
         if not module.training: return None
         if torch.is_grad_enabled() and self.steps % self.TCov == 0:
-            #print(input[0].data, input[0].data.size())
             aa = self.CovAHandler(input[0].data, module)
             module._A = aa
             # Initialize buffers
@@ -107,6 +106,8 @@ class KFACOptimizer(optim.Optimizer):
         d_a_inv = 1.0 / self.d_a[m]  # Inverse of eigenvalues for m_aa
         d_g_inv = 1.0 / self.d_g[m]  # Inverse of eigenvalues for m_gg
 
+        # giving model access to inverses and log determinants 
+        # not using this in current implementation
         m.A_inv = self.Q_a[m] @ torch.diag(d_a_inv) @ self.Q_a[m].T  # Explicit inverse of m_aa
         m.G_inv = self.Q_g[m] @ torch.diag(d_g_inv) @ self.Q_g[m].T
         m.log_det_A = torch.sum(torch.log(self.d_a[m]))
@@ -148,7 +149,6 @@ class KFACOptimizer(optim.Optimizer):
         else:
             v = [v.view(m.q_mu.grad.data.size())]
 
-        #print("GRAd", m.q_mu.grad)
         return v
 
     def _kl_clip_and_update_grad(self, updates, lr):

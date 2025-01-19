@@ -12,8 +12,7 @@ from tensorboardX import SummaryWriter
 from data.dataloader import get_bMNIST
 from utils.pac_bayes_loss import pac_bayes_loss
 from utils.evaluate import evaluate_BNN
-import math
-
+from utils.config import *
 
 
 # fetch args
@@ -41,7 +40,7 @@ parser.add_argument('--log_dir', default='runs/pretrain', type=str)
 
 parser.add_argument('--optimizer', default='kfac', type=str)
 parser.add_argument('--batch_size', default=64, type=float)
-parser.add_argument('--epoch', default=50, type=int)
+parser.add_argument('--epoch', default=1, type=int)
 parser.add_argument('--milestone', default=None, type=str)
 parser.add_argument('--learning_rate', default=0.001, type=float)
 parser.add_argument('--momentum', default=0.9, type=float)
@@ -53,7 +52,6 @@ parser.add_argument('--TCov', default=10, type=int)
 parser.add_argument('--TScal', default=10, type=int)
 parser.add_argument('--TInv', default=100, type=int)
 
-device = 'cpu'
 parser.add_argument('--prefix', default=None, type=str)
 args = parser.parse_args()
 
@@ -63,12 +61,6 @@ nc = {
     'cifar100': 100
 }
 
-delta = torch.tensor(0.025, dtype=torch.float32).to(device)
-m = torch.tensor(60000, dtype=torch.float32).to(device)
-b = torch.tensor(100, dtype=torch.float32).to(device)
-c = torch.tensor(1, dtype=torch.float32).to(device)
-pi = torch.tensor(math.pi, dtype=torch.float32).to(device)
-delta_prime = 0.01
 
 num_classes = nc[args.dataset]
 
@@ -245,8 +237,8 @@ def test(epoch):
     N_samples = 2
     plot = True
     save_plot = False
-    if (epoch == 49):
-        evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, test_loss, acc, plot=plot, save_plot=save_plot)
+    if (epoch == 0):
+        evaluate_BNN(net, trainloader, testloader, delta, b, c, N_samples, device, test_loss, acc, plot=plot, save_plot=save_plot)
 
 
 def main():

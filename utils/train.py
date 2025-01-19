@@ -4,7 +4,6 @@ from torch.utils.data import DataLoader
 
 from models.mlp import MLP
 from models.bnn import BayesianNN
-from models.bayes_linear import BayesianLinear
 
 import time
 
@@ -26,7 +25,6 @@ def train(model: nn.Module,
           trainloader: DataLoader, 
           loss_fn: nn.Module,
           device: str) -> tuple[list[float], list[float]]:
-    #assert any(isinstance(model, model_type) for model_type in SUPPORTED_MODELS), f"Model type {model.__class__.__name__} not supported."
     
     m = len(trainloader.dataset)
     start_t = time.time()

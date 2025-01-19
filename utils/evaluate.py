@@ -42,8 +42,13 @@ def evaluate_MLP(model: MLP, testloader, device, losses: list[float] = None, acc
     
     return test_acc
     
-def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, losses: list[float] = None, 
+def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, b, c, N_samples, device, losses: list[float] = None, 
                  accs: list[float] = None, plot=False, save_plot=False):
+    """
+    Discretizes log sigma which we treat as a continuous parameter during optimization such that KL is maximized. Then 
+    computes the final training error, sampling N times, and the resulting PAC-Bayes bound.
+    """
+
     model.eval()
     model.flag = 'eval'
     

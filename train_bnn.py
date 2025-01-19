@@ -13,18 +13,12 @@ from utils.seed import set_seed
 from utils.pac_bayes_loss import pac_bayes_loss
 from utils.train import train
 from utils.evaluate import evaluate_BNN
-from optimizers.kfac3 import KFACOptimizer
-from optimizers.noisy_kfac import NoisyKFAC
-
-#from optimizers.ivon import *
 
 from models.bnn import BayesianNN
+from utils.config import *
 
 # Setup
 set_seed(42)
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-SAVE_WEIGHTS = True
-LOAD_DATA = False
 
 # Load trained weights
 w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
@@ -42,19 +36,9 @@ batch_size = 100
 learning_rate = 1e-2
 damping = 1e-1
 
-delta = torch.tensor(0.025, dtype=torch.float32).to(device)
-m = torch.tensor(60000, dtype=torch.float32).to(device)
-b = torch.tensor(100, dtype=torch.float32).to(device)
-c = torch.tensor(0.1, dtype=torch.float32).to(device)
-pi = torch.tensor(math.pi, dtype=torch.float32).to(device)
-delta_prime = 0.01
 
 # Training
 optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
-#optimizer = KFACOptimizer(bnn_model, lr=learning_rate)
-#print(list(bnn_model.parameters()))
-#optimizer = NoisyKFAC(bnn_model, lr=1e-3)
-#optimizer = optimizer = SINGD(bnn_model, lr=1e-3, warn_unsupported=False)
 scheduler = StepLR(optimizer, step_size=30, gamma=1.0)  # Decay by 0.5 every 10 epochs
 trainloader, testloader = get_bMNIST(batch_size)
 
@@ -67,7 +51,7 @@ if not LOAD_DATA:
     N_samples = 10
     plot = True
     save_plot = False
-    evaluate_BNN(bnn_model, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, bnn_losses, bnn_accs, plot=plot, save_plot=save_plot)
+    evaluate_BNN(bnn_model, trainloader, testloader, delta, b, c, N_samples, device, bnn_losses, bnn_accs, plot=plot, save_plot=save_plot)
 else:
     params = torch.load('./checkpoints/bnn/baseline.pt', weights_only=True)
     #print("HERE", params)
@@ -76,7 +60,7 @@ else:
     N_samples = 10
     plot = False
     save_plot = False
-    evaluate_BNN(bnn_model, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, plot=plot, save_plot=save_plot)
+    evaluate_BNN(bnn_model, trainloader, testloader, delta, b, c, N_samples, device, plot=plot, save_plot=save_plot)
     
 
 # Save weights

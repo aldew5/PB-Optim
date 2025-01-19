@@ -1,6 +1,9 @@
 import torch
 
 def pac_bound(train_err, BRE_init, num_steps=5):
+    """
+    Computes the final PAC-Bayes bound
+    """
     if torch.sqrt(0.5 * BRE_init) > 1:
         return 1.0
     
