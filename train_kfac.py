@@ -41,7 +41,7 @@ parser.add_argument('--log_dir', default='runs/pretrain', type=str)
 
 parser.add_argument('--optimizer', default='kfac', type=str)
 parser.add_argument('--batch_size', default=64, type=float)
-parser.add_argument('--epoch', default=5, type=int)
+parser.add_argument('--epoch', default=50, type=int)
 parser.add_argument('--milestone', default=None, type=str)
 parser.add_argument('--learning_rate', default=0.001, type=float)
 parser.add_argument('--momentum', default=0.9, type=float)
@@ -158,6 +158,11 @@ def train(epoch):
         inputs, targets = inputs.to(device), targets.to(device).float().view(-1, 1)
         optimizer.zero_grad()
         outputs = net(inputs)
+        
+        # fix output range [-10, 10]
+        preds = torch.maximum(outputs[0], torch.tensor(10))
+        preds = torch.clamp(preds, min=-10)
+
   
         loss = pac_bayes_loss2(outputs, targets)
         #print("LOSS", loss)
@@ -165,8 +170,8 @@ def train(epoch):
             # compute true fisher
             optimizer.acc_stats = True
             with torch.no_grad():
-                #print(outputs[0].min(), outputs[0].max())
-                sampled_y = torch.multinomial(torch.sigmoid(outputs[0]), 1).float()
+                #print(torch.sigmoid(outputs[0]))
+                sampled_y = torch.multinomial(preds, 1).float()
             loss_sample = pac_bayes_loss2(outputs, sampled_y)
             loss_sample.backward(retain_graph=True)
             optimizer.acc_stats = False
@@ -240,7 +245,7 @@ def test(epoch):
     N_samples = 2
     plot = True
     save_plot = False
-    if (epoch == 4):
+    if (epoch == 49):
         evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, test_loss, acc, plot=plot, save_plot=save_plot)
 
 

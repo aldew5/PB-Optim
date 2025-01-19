@@ -44,8 +44,6 @@ class BayesianLinear(nn.Module):
         self.p_weight_mu = nn.Parameter(init_p["weight"], requires_grad=False)
         self.p_bias_mu = nn.Parameter(init_p["bias"], requires_grad=False)
         
-        # bias means (mu) and log-std (log_sigma)
-        self.q_bias_mu = nn.Parameter(init_q["bias"]) 
 
         # for use in optimizer. will store gradients and A, G for momentum updates
         self.id = id
@@ -84,9 +82,12 @@ class BayesianLinear(nn.Module):
         else:
             # weight means (mu) and log-std (log_sigma)
             self.q_weight_mu = nn.Parameter(init_q["weight"])  
+            # bias means (mu) and log-std (log_sigma)
+            self.q_bias_mu = nn.Parameter(init_q["bias"]) 
 
             self.q_weight_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_weight_mu))) 
             self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))  
+            
 
     @staticmethod
     def kl_normal_diag(p_mu, p_sigma, q_mu, q_sigma):
@@ -152,15 +153,22 @@ class BayesianLinear(nn.Module):
             #q_bias_sigma = torch.exp(self.q_bias_log_sigma)
 
             # use means for forward
-            weights = self.q_mu #sample_from_kron_dist(self.q_weight_mu, self._A, self._G).view(self.out_features, self.in_features)
+            weights = self.q_mu
+
+            #weights = torch.zeros_like(self.q_mu)
+            weights = sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
+            #print(weights.diagonal())
+            #print(weights)
+            #print('weights', weights)
             #bias = self.q_bias_mu #+ q_bias_sigma * torch.randn_like(q_bias_sigma)
 
             kl = self.kl_divergence_kfac_weight(self.p_mu, p_sigma, self.q_mu, flag)
             #kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
             #kl = kl_weight + kl_bias
-
-            #outputs = F.linear(x, weights, bias)
-            outputs = x @ weights.T
+            #tensor(
+            outputs = F.linear(x, weights, torch.zeros(self.out_features))
+            #print("WEIGHTS", weights.size())
+            #outputs = x @ weights.T
 
         # diagonal approximation
         else:
@@ -294,6 +302,7 @@ class BayesianLinear(nn.Module):
             kl = 0
             if flag == 'eval': kl = self.prev_kl
             self.training = False
+            #print("FALSE")
         else:
             self.prev_kl = kl
             
