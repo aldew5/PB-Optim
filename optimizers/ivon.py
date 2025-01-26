@@ -7,6 +7,8 @@ import torch.distributed as dist
 from torch import Tensor
 
 
+### CODE FROM LIN ET AL. ###
+
 ClosureType = Callable[[], Tensor]
 
 

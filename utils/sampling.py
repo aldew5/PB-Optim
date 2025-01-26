@@ -89,9 +89,9 @@ def sample_from_kron_dist(q_mu, A, G, epsilon=1e-2):
 
 
 
-def sample_from_kron_dist_fast(q_mu, A, G, epsilon=10):
+def sample_from_kron_dist_fast(q_mu, A, G, epsilon=1e-3):
     """
-    Sample from a multivariate normal distribution with covariance A^{-1} ⊗ G^{-1},
+    Sample from a multivariate normal distribution N(q_mu, A^{-1} ⊗ G^{-1}) = MN(q_mu, G^{-1}, A^{-1}),
     where we interpret the final (m*n)-dim vector as an (m x n) matrix.
 
     Args:
@@ -102,6 +102,9 @@ def sample_from_kron_dist_fast(q_mu, A, G, epsilon=10):
 
     Returns:
         torch.Tensor: Sample of size (m * n,).
+    
+    1. double-check KL with damping 
+    2. Sampling at mean plus empirical risk with normal sample
     """
 
     # ensure flattened mean

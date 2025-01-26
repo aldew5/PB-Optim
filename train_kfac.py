@@ -40,7 +40,7 @@ parser.add_argument('--log_dir', default='runs/pretrain', type=str)
 
 parser.add_argument('--optimizer', default='kfac', type=str)
 parser.add_argument('--batch_size', default=64, type=float)
-parser.add_argument('--epoch', default=1, type=int)
+parser.add_argument('--epoch', default=20, type=int)
 parser.add_argument('--milestone', default=None, type=str)
 parser.add_argument('--learning_rate', default=0.001, type=float)
 parser.add_argument('--momentum', default=0.9, type=float)
@@ -70,11 +70,6 @@ trainloader, testloader = get_bMNIST(batch_size=100)
 w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
 w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 
-
-# INIT SETTINGS:
-# prior mean: w0 (MLP random init)
-# prior var: lambda = e^{-6}
-# posterior mean: w1 (MLP learned weights)
 net = BayesianNN(w0, w1, p_log_sigma=-6,  approx='kfac').to(device)
 # init optimizer and lr scheduler
 optim_name = args.optimizer.lower()
@@ -120,8 +115,6 @@ if args.resume:
     start_epoch = checkpoint['epoch']
     print('==> Loaded checkpoint at epoch: %d, acc: %.2f%%' % (start_epoch, best_acc))
 
-# init summary writter
-
 log_dir = os.path.join(args.log_dir, args.dataset, args.network, args.optimizer,
                        'lr%.3f_wd%.4f_damping%.4f' %
                        (args.learning_rate, args.weight_decay, args.damping))
@@ -157,12 +150,10 @@ def train(epoch):
 
   
         loss = pac_bayes_loss2(outputs, targets)
-        #print("LOSS", loss)
         if optim_name in ['kfac', 'ekfac'] and optimizer.steps % optimizer.TCov == 0:
             # compute true fisher
             optimizer.acc_stats = True
             with torch.no_grad():
-                #print(torch.sigmoid(outputs[0]))
                 sampled_y = torch.multinomial(preds, 1).float()
             loss_sample = pac_bayes_loss2(outputs, sampled_y)
             loss_sample.backward(retain_graph=True)
@@ -234,11 +225,11 @@ def test(epoch):
         best_acc = acc
     
 
-    N_samples = 2
+    N_samples = 10
     plot = True
     save_plot = False
-    if (epoch == 0):
-        evaluate_BNN(net, trainloader, testloader, delta, b, c, N_samples, device, test_loss, acc, plot=plot, save_plot=save_plot)
+    if (epoch == 19):
+        evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, test_loss, acc, plot=plot, save_plot=save_plot)
 
 
 def main():

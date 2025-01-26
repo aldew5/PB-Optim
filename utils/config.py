@@ -9,6 +9,8 @@ m = torch.tensor(60000, dtype=torch.float32).to(device)
 b = torch.tensor(100, dtype=torch.float32).to(device)
 c = torch.tensor(0.1, dtype=torch.float32).to(device)
 pi = torch.tensor(math.pi, dtype=torch.float32).to(device)
+delta_prime = torch.tensor(0.01, dtype=torch.float32).to(device)
+
 
 SAVE_WEIGHTS = True
 LOAD_DATA = False

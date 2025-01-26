@@ -13,6 +13,7 @@ from utils.seed import set_seed
 from utils.pac_bayes_loss import pac_bayes_loss
 from utils.train import train
 from utils.evaluate import evaluate_BNN
+from optimizers.vogn.vogn import VOGN
 
 from models.bnn import BayesianNN
 from utils.config import *
@@ -38,7 +39,7 @@ damping = 1e-1
 
 
 # Training
-optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
+optimizer = VOGN()
 scheduler = StepLR(optimizer, step_size=30, gamma=1.0)  # Decay by 0.5 every 10 epochs
 trainloader, testloader = get_bMNIST(batch_size)
 

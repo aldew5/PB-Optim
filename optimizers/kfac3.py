@@ -187,6 +187,7 @@ class KFACOptimizer(optim.Optimizer):
                     continue
                 d_p = p.grad.data
                 param_name = param2name.get(p, "<unknown>")
+                # update to prior std
                 if param_name == "p_log_sigma":
                     p.data.add_(-group['lr'], d_p)
                     continue

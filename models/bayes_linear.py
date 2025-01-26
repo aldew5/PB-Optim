@@ -140,8 +140,13 @@ class BayesianLinear(nn.Module):
             x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1)
             # prior std
             p_sigma = torch.exp(p_log_sigma)
-
-            # sample weights from posterior
+            
+            if flag == 'eval':
+                # sample weights from posterior
+                weights = sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
+            else:
+                weights = self.q_mu
+                
             weights = sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
             # compute KL between kfactored posterior and diagonal prior
             kl = self.kl_divergence_kfac(self.p_mu, p_sigma, self.q_mu, flag)
@@ -206,6 +211,7 @@ class BayesianLinear(nn.Module):
         A, G = self._A, self._G
         n, m = A.shape[0], G.shape[0]
 
+        
         trace_A = torch.trace(A)
         trace_G = torch.trace(G)
         A = A / (trace_A + epsilon)
@@ -262,13 +268,13 @@ class BayesianLinear(nn.Module):
         if kl < 0:
             kl = 0
             if flag == 'eval': kl = self.prev_kl
-            self.training = False
+            if self.training: self.training = False
         else:
             self.prev_kl = kl
             
         return kl
     
-    def kl_normal_diag(p_mu, p_sigma, q_mu, q_sigma):
+    def kl_normal_diag(self, p_mu, p_sigma, q_mu, q_sigma):
         """
         Compute KL divergence between two normal distributions.
             
