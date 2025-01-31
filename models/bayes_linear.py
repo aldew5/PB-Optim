@@ -74,7 +74,7 @@ class BayesianLinear(nn.Module):
             self.log_det_A, self.log_det_G = None, None
 
             #self.q_weight_mu = nn.Parameter(init_q["weight"])
-            #self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))    
+            #self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))   
             self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1)) 
             self.p_mu = nn.Parameter(torch.cat((init_p["weight"], init_p['bias'].unsqueeze(1)), dim=1), requires_grad=False)  
             self.q_bias_mu = None
@@ -92,7 +92,7 @@ class BayesianLinear(nn.Module):
             
 
 
-    def forward(self, x, p_log_sigma, flag, T_stats=20, beta_1=0.9):
+    def forward(self, x, p_log_sigma, flag, T_stats=20, beta_1=0.9, num_samples=10):
         """
             params:
                 - k: current iteration number
@@ -140,17 +140,26 @@ class BayesianLinear(nn.Module):
             x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1)
             # prior std
             p_sigma = torch.exp(p_log_sigma)
-            
+            """
             if flag == 'eval':
                 # sample weights from posterior
                 weights = sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
             else:
                 weights = self.q_mu
-                
-            weights = sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
+                """
+            """
+            weights = 0
+            for _ in range(num_samples):
+                weights += 1/num_samples * sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
+            """
+            
+            
             # compute KL between kfactored posterior and diagonal prior
             kl = self.kl_divergence_kfac(self.p_mu, p_sigma, self.q_mu, flag)
-            outputs = F.linear(x, weights, torch.zeros(self.out_features))
+            
+            #outputs = F.linear(x, weights, torch.zeros(self.out_features))
+            # sample activations instead of weights (Kingma et al, 2015)
+            outputs = sample_activations_kron_fast(self.q_mu, x, self._A, self._G)
 
         # diagonal approximation
         else:
@@ -194,7 +203,7 @@ class BayesianLinear(nn.Module):
         
         return kl
     
-    def kl_divergence_kfac(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-3):
+    def kl_divergence_kfac(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-1):
         """
         Compute the KL divergence between a diagonal Gaussian prior and a Kronecker-factored Gaussian posterior.
 

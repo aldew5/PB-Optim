@@ -13,6 +13,8 @@ from data.dataloader import get_bMNIST
 from utils.pac_bayes_loss import pac_bayes_loss
 from utils.evaluate import evaluate_BNN
 from utils.config import *
+import matplotlib.pyplot as plt
+from utils.newtons import pac_bound
 
 
 # fetch args
@@ -40,7 +42,7 @@ parser.add_argument('--log_dir', default='runs/pretrain', type=str)
 
 parser.add_argument('--optimizer', default='kfac', type=str)
 parser.add_argument('--batch_size', default=64, type=float)
-parser.add_argument('--epoch', default=20, type=int)
+parser.add_argument('--epoch', default=1, type=int)
 parser.add_argument('--milestone', default=None, type=str)
 parser.add_argument('--learning_rate', default=0.001, type=float)
 parser.add_argument('--momentum', default=0.9, type=float)
@@ -102,7 +104,7 @@ else:
     lr_scheduler = MultiStepLR(optimizer, milestones=milestone, gamma=0.1)
 
 # init criterion
-criterion = nn.CrossEntropyLoss()
+bce_loss = nn.BCEWithLogitsLoss()
 
 start_epoch = 0
 best_acc = 0
@@ -121,6 +123,7 @@ log_dir = os.path.join(args.log_dir, args.dataset, args.network, args.optimizer,
 if not os.path.isdir(log_dir):
     os.makedirs(log_dir)
 writer = SummaryWriter(log_dir)
+kls, bces, errs, bounds = [], [], [], []
 
 def pac_bayes_loss2(outputs, labels):
     return pac_bayes_loss(outputs, labels, m, b, c, pi, delta)
@@ -203,6 +206,12 @@ def test(epoch):
 
     # Save checkpoint.
     acc = 100.*correct/total
+    # compute the inverse kl between the train err
+    #kl_inv = torch.tensor(train_err + torch.sqrt(math.log(2)/(delta_prime * N_samples) * 0.5))
+
+    errs.append(1 - correct/total)
+    kls.append(outputs[1].clone().detach())
+    bces.append(bce_loss(preds, targets).clone().detach())
 
     writer.add_scalar('test/loss', test_loss / (batch_idx + 1), epoch)
     writer.add_scalar('test/acc', 100. * correct / total, epoch)
@@ -225,11 +234,11 @@ def test(epoch):
         best_acc = acc
     
 
-    N_samples = 10
+    N_samples = 2
     plot = True
-    save_plot = False
-    if (epoch == 19):
-        evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, test_loss, acc, plot=plot, save_plot=save_plot)
+    save_plot = False    
+    if epoch == 19:
+        evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, bounds, acc, plot=plot, save_plot=save_plot)
 
 
 def main():
@@ -237,6 +246,44 @@ def main():
     for epoch in range(start_epoch, args.epoch):
         train(epoch)
         test(epoch)
+
+    # --- Plot 1: BCE Loss ---
+    fig1, ax1 = plt.subplots()
+    ax1.plot(bces, color='tab:blue', label='BCE Loss')
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('BCE Loss', color='tab:blue')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
+    ax1.set_title('BCE Loss')
+    ax1.legend()
+
+    # --- Plot 2: KL Divergence ---
+    fig2, ax2 = plt.subplots()
+    ax2.plot(kls, color='tab:orange', label='KL Divergence')
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('KL Divergence', color='tab:orange')
+    ax2.tick_params(axis='y', labelcolor='tab:orange')
+    ax2.set_title('KL Divergence')
+    ax2.legend()
+
+    # Bottom plot for accuracy
+    fig3, ax3 = plt.subplots()
+    ax3.plot(errs, color='tab:green', label='error')
+    ax3.set_xlabel('Epoch')
+    ax3.set_ylabel('Test Error', color='tab:green')
+    ax3.tick_params(axis='y', labelcolor='tab:green')
+    ax3.set_title('Test Error')
+    ax3.legend()
+
+
+    fig3, ax3 = plt.subplots()
+    ax3.plot(bounds, color='tab:green', label='PB Bound')
+    ax3.set_xlabel('Epoch')
+    ax3.set_ylabel('PAC-Bayes Bound', color='tab:green')
+    ax3.tick_params(axis='y', labelcolor='tab:green')
+    ax3.set_title('PAC-Bayes Bound')
+    ax3.legend()
+    # Adjust layout for better spacing
+    plt.show()
 
     return best_acc
 

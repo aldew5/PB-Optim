@@ -42,7 +42,7 @@ def evaluate_MLP(model: MLP, testloader, device, losses: list[float] = None, acc
     
     return test_acc
     
-def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, losses: list[float] = None, 
+def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, bounds: list[float] = None, 
                  accs: list[float] = None, plot=False, save_plot=False):
     """
     Discretizes log sigma which we treat as a continuous parameter during optimization such that KL is maximized. Then 
@@ -107,8 +107,13 @@ def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime,
     #kl_inv = torch.tensor(train_err + torch.sqrt(math.log(2)/(delta_prime * N_samples) * 0.5))
 
     pac_bayes_bound = pac_bound(train_err, BRE.clone().detach())
+    bounds.append(pac_bayes_bound)
     print(f'PAC-Bayes bound: {pac_bayes_bound}')
+
+    model.train()
+    model.flag = 'train'
     
+    """
     if plot or save_plot:
         fig, ax1 = plt.subplots()
 
@@ -130,5 +135,6 @@ def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime,
         plt.show()
     if save_plot:
         plt.savefig(f'BNN_loss_acc.png')
+    """
     
     return test_acc

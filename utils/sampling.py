@@ -89,7 +89,7 @@ def sample_from_kron_dist(q_mu, A, G, epsilon=1e-2):
 
 
 
-def sample_from_kron_dist_fast(q_mu, A, G, epsilon=1e-3):
+def sample_from_kron_dist_fast(q_mu, A, G, epsilon=1e-1):
     """
     Sample from a multivariate normal distribution N(q_mu, A^{-1} ⊗ G^{-1}) = MN(q_mu, G^{-1}, A^{-1}),
     where we interpret the final (m*n)-dim vector as an (m x n) matrix.
@@ -145,6 +145,73 @@ def sample_from_kron_dist_fast(q_mu, A, G, epsilon=1e-3):
 
     return samples
 
+
+
+def sample_activations_kron_fast(
+    q_mu: torch.Tensor,  # Mean of vec(W) in shape (m*n,) or (m, n)
+    X: torch.Tensor,     # "Input" matrix of shape (M, m)
+    A: torch.Tensor,     # Kronecker factor for columns (n x n)
+    G: torch.Tensor,     # Kronecker factor for rows (m x m)
+    epsilon: float = 1e-1
+) -> torch.Tensor:
+    """
+    Sample B = X * W where W ~ N(q_mu, (A^-1 ⊗ G^-1)), i.e. Kronecker-factorized
+    Gaussian for W in R^{m x n}, without explicitly forming W.
+    
+    Args:
+        q_mu   : Flattened mean for W (m*n,) or (m,n).
+        X      : (M x m) matrix we multiply by W.
+        A      : (n x n) factor for columns of W.
+        G      : (m x m) factor for rows of W.
+        epsilon: Regularization constant.
+
+    Returns:
+        B_samp : (M x n) sample drawn from the distribution of B.
+    """
+    # Make sure q_mu is a flat vector, then reshape to (m, n) for convenience.
+   # if q_mu.ndim > 1:
+    #    q_mu = q_mu.view(-1)
+    
+    m = G.shape[0]
+    n = A.shape[0]
+    #W_mu = q_mu.view(m, n)  # shape (m, n)
+
+    # We'll need (M x m) * (m x n) => (M x n) eventually
+
+    #assert X.shape[1] == m, "X must have 'm' columns to match W's row dimension."
+
+    # -- 1. Compute B's mean directly: B_mean = X @ W_mu
+    B_mean = X @ q_mu.T  # shape (M x n)
+
+    # -- 2. We need an eigen-factorization of G and A (regularized).
+    A_reg = A + epsilon * torch.eye(n, device=A.device, dtype=A.dtype)
+    G_reg = G + epsilon * torch.eye(m, device=G.device, dtype=G.dtype)
+
+    dA, QA = torch.linalg.eigh(A_reg)  # A -> QA diag(dA) QA^T
+    dG, QG = torch.linalg.eigh(G_reg)  # G -> QG diag(dG) QG^T
+
+    # -- 3. Inverse sqrt of eigenvalues
+    dA_inv_sqrt = 1.0 / torch.sqrt(torch.clamp(dA, min=epsilon))
+    dG_inv_sqrt = 1.0 / torch.sqrt(torch.clamp(dG, min=epsilon))
+
+    # -- 4. Draw standard normal Z of shape (m x n) 
+    Z = torch.randn(m, n, device=q_mu.device, dtype=q_mu.dtype)
+
+    # -- 5. Apply the Kronecker-factor “square root” transform for W:
+    #        W_samp = QG diag(dG_inv_sqrt) * Z * diag(dA_inv_sqrt) QA^T
+    #   This would be a sample from N(0, G^-1 ⊗ A^-1) if we omit the mean.
+    Z_row_scaled = torch.diag(dG_inv_sqrt) @ Z            # (m x m)*(m x n)->(m x n)
+    Z_left       = QG @ Z_row_scaled                      # (m x m)*(m x n)->(m x n)
+    Z_col_scaled = Z_left @ torch.diag(dA_inv_sqrt)       # (m x n)*(n x n)->(m x n)
+    W_noise      = Z_col_scaled @ QA.T                    # (m x n)*(n x n)->(m x n)
+
+    # -- 6. Now form B_noise = X @ W_noise.  This is one sample from N(0, X Σ_W X^T).
+    B_noise = X @ W_noise.T  # shape (M x n)
+
+    # -- 7. Add the mean part
+    B_samp = B_mean + B_noise  # shape (M x n)
+
+    return B_samp
 
 
 def sample_mvnd(mean, row_cov, col_cov):
