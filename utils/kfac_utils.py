@@ -85,6 +85,7 @@ class ComputeMatGrad:
         return grad
 
 
+
 class ComputeCovA:
 
     @classmethod
@@ -123,6 +124,7 @@ class ComputeCovA:
         #if layer.q_bias_mu is not None:
         a = torch.cat([a, a.new(a.size(0), 1).fill_(1)], 1)
         return a.t() @ (a / batch_size)
+
 
 
 class ComputeCovG:

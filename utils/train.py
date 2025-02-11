@@ -9,6 +9,8 @@ import time
 
 SUPPORTED_MODELS = [BayesianNN, MLP]
 params = {"count": 0, "beta1": 1e-2, "lam": 1e-1}
+bce_loss = nn.BCEWithLogitsLoss()
+
 
 def update_G(module, grad_input, grad_output):
     """
@@ -30,7 +32,9 @@ def train(model: nn.Module,
     start_t = time.time()
     
     losses = []
-    accs = []
+    errors = []
+    kls = []
+    bces = []
 
     # hook to retrieve gradients for updating G in kfac layers
     #if model.approx == 'kfac' or model.approx == 'noisy-kfac':
@@ -40,8 +44,8 @@ def train(model: nn.Module,
     
     model.train()
 
-    if model.approx == 'kfac':
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+    #if model.approx == 'kfac':
+    #    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
     for epoch in range(num_epochs):
         running_loss = 0.
@@ -56,6 +60,9 @@ def train(model: nn.Module,
             loss_size = loss_fn(outputs, labels)
             loss_size.backward()
 
+            #for name, param in model.named_parameters():
+                #print(f"{name}.grad: {param.grad}")
+
             optimizer.step()
 
             preds = torch.round(torch.sigmoid(outputs[0]))
@@ -68,13 +75,15 @@ def train(model: nn.Module,
         running_loss /= m
         running_acc /= m
         losses.append(running_loss)
-        accs.append(running_acc)
+        bces.append(bce_loss(preds, labels).clone().detach())
+        errors.append(1-running_acc)
+        kls.append(outputs[1].clone().detach())
         
         scheduler.step()
-        print("KL", outputs[1])
+        print("KL:", outputs[1])
         print('Epoch: {:04d}'.format(epoch+1),
             'loss_train: {:.4f}'.format(running_loss),
             'acc_train: {:.4f}'.format(running_acc),
             'time: {:.4f}s'.format(time.time() - start_t))
 
-    return losses, accs
+    return losses, errors, kls, bces

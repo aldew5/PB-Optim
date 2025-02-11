@@ -1,7 +1,6 @@
 
 
 import torch
-import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 from singd.optim.optimizer import SINGD
 

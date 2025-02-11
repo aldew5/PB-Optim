@@ -6,7 +6,7 @@ from models.mlp import MLP
 from models.bnn import BayesianNN
 from utils.newtons import pac_bound
 
-def evaluate_MLP(model: MLP, testloader, device, losses: list[float] = None, accs: list[float] = None, plot=False, save_plot=False):
+def evaluate_MLP(model: MLP, testloader, device, losses: list[float] = None, plot=False, save_plot=False):
     model.eval()
     test_acc = 0
     with torch.no_grad():
@@ -42,8 +42,8 @@ def evaluate_MLP(model: MLP, testloader, device, losses: list[float] = None, acc
     
     return test_acc
     
-def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, bounds: list[float] = None, 
-                 accs: list[float] = None, plot=False, save_plot=False):
+def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, 
+                 losses = [], errors: list[float] = None, kls: list[float] = None, bces = None, plot=False, save_plot=False):
     """
     Discretizes log sigma which we treat as a continuous parameter during optimization such that KL is maximized. Then 
     computes the final training error, sampling N times, and the resulting PAC-Bayes bound.
@@ -107,34 +107,51 @@ def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime,
     #kl_inv = torch.tensor(train_err + torch.sqrt(math.log(2)/(delta_prime * N_samples) * 0.5))
 
     pac_bayes_bound = pac_bound(train_err, BRE.clone().detach())
-    bounds.append(pac_bayes_bound)
+    #bounds.append(pac_bayes_bound)
     print(f'PAC-Bayes bound: {pac_bayes_bound}')
 
     model.train()
     model.flag = 'train'
     
-    """
     if plot or save_plot:
-        fig, ax1 = plt.subplots()
-
-        # Plot BNN loss on the first y-axis
-        ax1.plot(losses, color='tab:blue')
+            # --- Plot 1: BCE Loss ---
+        fig1, ax1 = plt.subplots()
+        ax1.plot(losses, color='tab:blue', label='PAC Bayes Loss')
         ax1.set_xlabel('Epoch')
-        ax1.set_ylabel('BNN Loss', color='tab:blue')
+        ax1.set_ylabel('PB Loss', color='tab:blue')
         ax1.tick_params(axis='y', labelcolor='tab:blue')
+        ax1.set_title('PB Loss')
+        ax1.legend()
 
-        # Create a second y-axis to plot BNN accuracy
-        ax2 = ax1.twinx()
-        ax2.plot(accs, color='tab:orange')
-        ax2.set_ylabel('BNN Accuracy', color='tab:orange')
+        # --- Plot 2: KL Divergence ---
+        fig2, ax2 = plt.subplots()
+        ax2.plot(kls, color='tab:orange', label='KL Divergence')
+        ax2.set_xlabel('Epoch')
+        ax2.set_ylabel('KL Divergence', color='tab:orange')
         ax2.tick_params(axis='y', labelcolor='tab:orange')
+        ax2.set_title('KL Divergence')
+        ax2.legend()
 
-        plt.title('BNN Loss and Accuracy')
+        # Bottom plot for accuracy
+        fig3, ax3 = plt.subplots()
+        ax3.plot(errors, color='tab:green', label='error')
+        ax3.set_xlabel('Epoch')
+        ax3.set_ylabel('Test Error', color='tab:green')
+        ax3.tick_params(axis='y', labelcolor='tab:green')
+        ax3.set_title('Test Error')
+        ax3.legend()
+
+        fig3, ax3 = plt.subplots()
+        ax3.plot(bces, color='tab:green', label='error')
+        ax3.set_xlabel('Epoch')
+        ax3.set_ylabel('BCE Loss', color='tab:green')
+        ax3.tick_params(axis='y', labelcolor='tab:green')
+        ax3.set_title('BCE loss')
+        ax3.legend()
     
     if plot:
         plt.show()
     if save_plot:
         plt.savefig(f'BNN_loss_acc.png')
-    """
     
-    return test_acc
+    return pac_bayes_bound

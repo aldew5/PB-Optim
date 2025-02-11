@@ -49,6 +49,13 @@ class BayesianLinear(nn.Module):
         # for use in optimizer. will store gradients and A, G for momentum updates
         self.id = id
 
+        self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1)) 
+        self.p_mu = nn.Parameter(torch.cat((init_p["weight"], init_p['bias'].unsqueeze(1)), dim=1), requires_grad=False)  
+        self.q_bias_mu = None
+
+        self.training = True
+        self.prev_kl = None
+
         # TODO: does not currently work
         if self.approx == 'noisy-kfac':
             # F \approx A \otimes G
@@ -73,26 +80,14 @@ class BayesianLinear(nn.Module):
             self.A_inv, self.G_inv = None, None
             self.log_det_A, self.log_det_G = None, None
 
-            #self.q_weight_mu = nn.Parameter(init_q["weight"])
-            #self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))   
-            self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1)) 
-            self.p_mu = nn.Parameter(torch.cat((init_p["weight"], init_p['bias'].unsqueeze(1)), dim=1), requires_grad=False)  
-            self.q_bias_mu = None
-            self.training = True
-            self.prev_kl = None
-
         else:
-            # weight means (mu) and log-std (log_sigma)
-            self.q_weight_mu = nn.Parameter(init_q["weight"])  
-            # bias means (mu) and log-std (log_sigma)
-            self.q_bias_mu = nn.Parameter(init_q["bias"]) 
-
-            self.q_weight_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_weight_mu))) 
-            self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))  
+            self.q_log_sigma = nn.Parameter(torch.cat((0.5 * torch.log(torch.abs(init_q["weight"])), \
+                                                   0.5 * torch.log(torch.abs(init_q["bias"])).unsqueeze(1)), dim=1)) 
+            self.q_bias_mu = None
             
 
 
-    def forward(self, x, p_log_sigma, flag, T_stats=20, beta_1=0.9, num_samples=10):
+    def forward(self, x, p_log_sigma, flag, T_stats=20, beta_1=0.9, num_samples=4):
         """
             params:
                 - k: current iteration number
@@ -140,41 +135,31 @@ class BayesianLinear(nn.Module):
             x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1)
             # prior std
             p_sigma = torch.exp(p_log_sigma)
-            """
-            if flag == 'eval':
-                # sample weights from posterior
-                weights = sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
-            else:
-                weights = self.q_mu
-                """
-            """
-            weights = 0
-            for _ in range(num_samples):
-                weights += 1/num_samples * sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
-            """
-            
+   
+            #weights = 0
+            #for _ in range(num_samples):
+            #   weights += 1/num_samples * sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
             
             # compute KL between kfactored posterior and diagonal prior
             kl = self.kl_divergence_kfac(self.p_mu, p_sigma, self.q_mu, flag)
             
-            #outputs = F.linear(x, weights, torch.zeros(self.out_features))
+            #weights = sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
+            # outputs = F.linear(x, weights, torch.zeros(self.out_features))
             # sample activations instead of weights (Kingma et al, 2015)
             outputs = sample_activations_kron_fast(self.q_mu, x, self._A, self._G)
 
         # diagonal approximation
         else:
+            # append a column of 1's for bias term
+            x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1)
+            
             p_sigma = torch.exp(p_log_sigma)
-            q_weight_sigma = torch.exp(self.q_weight_log_sigma)
-            q_bias_sigma = torch.exp(self.q_bias_log_sigma)
+            q_sigma = torch.exp(self.q_log_sigma)
 
-            weight = self.q_weight_mu + q_weight_sigma * torch.randn_like(q_weight_sigma)
-            bias = self.q_bias_mu + q_bias_sigma * torch.randn_like(q_bias_sigma)
+            weights = self.q_mu + q_sigma * torch.randn_like(q_sigma)
+            kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
 
-            kl_weight = self.kl_normal_diag(self.p_weight_mu, p_sigma, self.q_weight_mu, q_weight_sigma)
-            kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
-            kl = kl_weight + kl_bias
-
-            outputs = F.linear(x, weight, bias)
+            outputs = F.linear(x, weights, torch.zeros(self.out_features))
 
         return outputs, kl
     
@@ -189,21 +174,16 @@ class BayesianLinear(nn.Module):
             float: KL divergence
         """
         kl = None
-        if self.approx == 'diagonal':
-            p_sigma = torch.exp(p_log_sigma)
-            q_weight_sigma = torch.exp(self.q_weight_log_sigma)
-            q_bias_sigma = torch.exp(self.q_bias_log_sigma)
-            
-            kl_weight = self.kl_normal_diag(self.p_weight_mu, p_sigma, self.q_weight_mu, q_weight_sigma)
-            kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
-            kl = kl_weight + kl_bias
+        p_sigma = torch.exp(p_log_sigma)
+        if self.approx == 'diag':
+            q_sigma = torch.exp(self.q_log_sigma)
+            kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
         else:
-            p_sigma = torch.exp(p_log_sigma)
             kl = self.kl_divergence_kfac(self.p_mu, p_sigma, self.q_mu, flag)
         
         return kl
     
-    def kl_divergence_kfac(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-1):
+    def kl_divergence_kfac(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-2):
         """
         Compute the KL divergence between a diagonal Gaussian prior and a Kronecker-factored Gaussian posterior.
 
@@ -277,10 +257,11 @@ class BayesianLinear(nn.Module):
         if kl < 0:
             kl = 0
             if flag == 'eval': kl = self.prev_kl
-            if self.training: self.training = False
+            #if self.training: self.training = False
         else:
             self.prev_kl = kl
-            
+        
+        print(kl)
         return kl
     
     def kl_normal_diag(self, p_mu, p_sigma, q_mu, q_sigma):

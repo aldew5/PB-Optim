@@ -3,9 +3,6 @@
 import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
-from singd.optim.optimizer import SINGD
-
-import math
 from pathlib import Path
 
 from data.dataloader import get_bMNIST
@@ -28,7 +25,7 @@ w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 # prior mean: w0 (MLP random init)
 # prior var: lambda = e^{-6}
 # posterior mean: w1 (MLP learned weights)
-bnn_model = BayesianNN(w0, w1, p_log_sigma=-6,  approx='diagonal').to(device)
+bnn_model = BayesianNN(w0, w1, p_log_sigma=-6,  approx='diag').to(device)
 
 # Hyperparameters
 epochs = 10
@@ -46,15 +43,14 @@ def pac_bayes_loss2(outputs, labels):
     return pac_bayes_loss(outputs, labels, m, b, c, pi, delta)
 
 if not LOAD_DATA:
-    bnn_losses, bnn_accs = train(bnn_model, epochs, optimizer, scheduler, trainloader, pac_bayes_loss2, device)
+    bnn_losses, bnn_errors, kls, bces = train(bnn_model, epochs, optimizer, scheduler, trainloader, pac_bayes_loss2, device)
 
     N_samples = 10
     plot = True
     save_plot = False
-    evaluate_BNN(bnn_model, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, bnn_losses, bnn_accs, plot=plot, save_plot=save_plot)
+    evaluate_BNN(bnn_model, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, bnn_losses, bnn_errors, kls, bces, plot=plot, save_plot=save_plot)
 else:
     params = torch.load('./checkpoints/bnn/baseline.pt', weights_only=True)
-    #print("HERE", params)
     bnn_model.load_state_dict(params)
     
     N_samples = 10

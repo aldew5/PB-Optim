@@ -82,15 +82,16 @@ if optim_name == 'sgd':
                           momentum=args.momentum,
                           weight_decay=args.weight_decay)
 elif optim_name == 'kfac':
-    optimizer = KFACOptimizer(net,
-                              lr=args.learning_rate,
-                              momentum=args.momentum,
-                              stat_decay=args.stat_decay,
-                              damping=args.damping,
-                              kl_clip=args.kl_clip,
-                              weight_decay=args.weight_decay,
-                              TCov=args.TCov,
-                              TInv=args.TInv)
+    # optimal params for diagonal
+    optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
+                              #lr=args.learning_rate,
+                              ##momentum=args.momentum,
+                              #stat_decay=args.stat_decay,
+                              #damping=args.damping,
+                              #kl_clip=args.kl_clip,
+                              #weight_decay=args.weight_decay,
+                              #TCov=args.TCov,
+                              #TInv=args.TInv)
 else:
     raise NotImplementedError
 
@@ -98,7 +99,7 @@ else:
 
 if args.milestone is None:
     #lr_scheduler = MultiStepLR(optimizer, milestones=[int(args.epoch*0.5), int(args.epoch*0.75)], gamma=0.1)
-    lr_scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
+    lr_scheduler = StepLR(optimizer, step_size=30, gamma=1)
 else:
     milestone = [int(_) for _ in args.milestone.split(',')]
     lr_scheduler = MultiStepLR(optimizer, milestones=milestone, gamma=0.1)
@@ -123,13 +124,13 @@ log_dir = os.path.join(args.log_dir, args.dataset, args.network, args.optimizer,
 if not os.path.isdir(log_dir):
     os.makedirs(log_dir)
 writer = SummaryWriter(log_dir)
-kls, bces, errs, bounds = [], [], [], []
+kls, bces, errs, bounds, losses = [], [], [], [], []
 
 def pac_bayes_loss2(outputs, labels):
     return pac_bayes_loss(outputs, labels, m, b, c, pi, delta)
 
 
-def train(epoch):
+def train(epoch, optimizer, net):
     print('\nEpoch: %d' % epoch)
     train_loss = 0
     correct = 0
@@ -142,26 +143,36 @@ def train(epoch):
     writer.add_scalar('train/lr', lr_scheduler.get_lr()[0], epoch)
 
     prog_bar = tqdm(enumerate(trainloader), total=len(trainloader), desc=desc, leave=True)
+    running_loss = 0.
+    m = len(trainloader.dataset)
     for batch_idx, (inputs, targets) in prog_bar:
         inputs, targets = inputs.to(device), targets.to(device).float().view(-1, 1)
         optimizer.zero_grad()
         outputs = net(inputs)
         
+        
         # fix output range [-10, 10]
-        preds = torch.maximum(outputs[0], torch.tensor(10))
-        preds = torch.clamp(preds, min=-10)
-
+        #preds = torch.maximum(outputs[0], torch.tensor(10))
+        #preds = torch.clamp(preds, min=-10)
+        #preds = (torch.nn.functional.softmax(outputs.cpu().data, dim=1), 1).squeeze()
+        #print(outputs[0])
   
         loss = pac_bayes_loss2(outputs, targets)
+
+        optimizer.acc_stats = True
+        
+        # for updating the kfactors
         if optim_name in ['kfac', 'ekfac'] and optimizer.steps % optimizer.TCov == 0:
             # compute true fisher
             optimizer.acc_stats = True
             with torch.no_grad():
-                sampled_y = torch.multinomial(preds, 1).float()
-            loss_sample = pac_bayes_loss2(outputs, sampled_y)
+                sampled_y = torch.multinomial(torch.nn.functional.softmax(outputs[0].data, dim=1),
+                                              1).squeeze().float()
+            loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1))
             loss_sample.backward(retain_graph=True)
             optimizer.acc_stats = False
             optimizer.zero_grad()  # clear the gradient for computing true-fisher.
+
         loss.backward()
         optimizer.step()
 
@@ -170,18 +181,22 @@ def train(epoch):
         preds = torch.round(torch.sigmoid(outputs[0]))
         total += targets.size(0)
         correct += preds.eq(targets).sum().item()
+        running_loss += loss.item()
 
         desc = ('[%s][LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)' %
                 (tag, lr_scheduler.get_lr()[0], train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
         prog_bar.set_description(desc, refresh=True)
 
-    writer.add_scalar('train/loss', train_loss/(batch_idx + 1), epoch)
-    writer.add_scalar('train/acc', 100. * correct / total, epoch)
+    print("KL:", outputs[1])
+    print('Epoch: {:04d}'.format(epoch+1),
+        'loss_train: {:.4f}'.format(running_loss/m),
+        'acc_train: {:.4f}'.format(correct/m))
 
 
-def test(epoch):
+def test(epoch, net):
     global best_acc
     net.eval()
+    net.flag = 'eval'
     test_loss = 0
     correct = 0
     total = 0
@@ -204,14 +219,12 @@ def test(epoch):
                     % (tag, lr_scheduler.get_lr()[0], test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             prog_bar.set_description(desc, refresh=True)
 
-    # Save checkpoint.
     acc = 100.*correct/total
-    # compute the inverse kl between the train err
-    #kl_inv = torch.tensor(train_err + torch.sqrt(math.log(2)/(delta_prime * N_samples) * 0.5))
 
     errs.append(1 - correct/total)
     kls.append(outputs[1].clone().detach())
     bces.append(bce_loss(preds, targets).clone().detach())
+    losses.append(test_loss)
 
     writer.add_scalar('test/loss', test_loss / (batch_idx + 1), epoch)
     writer.add_scalar('test/acc', 100. * correct / total, epoch)
@@ -237,15 +250,16 @@ def test(epoch):
     N_samples = 2
     plot = True
     save_plot = False    
-    if epoch == 19:
-        evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, bounds, acc, plot=plot, save_plot=save_plot)
+    if epoch == args.epoch:
+        evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, \
+                     errors=errs, kls=kls, bces=bces, plot=plot, save_plot=save_plot)
 
 
 def main():
     net.train()
     for epoch in range(start_epoch, args.epoch):
-        train(epoch)
-        test(epoch)
+        train(epoch, optimizer, net)
+        test(epoch, net)
 
     # --- Plot 1: BCE Loss ---
     fig1, ax1 = plt.subplots()

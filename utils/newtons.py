@@ -8,7 +8,7 @@ def pac_bound(train_err, BRE_init, num_steps=5):
         return 1.0
     
     cur_B = train_err + torch.sqrt(0.5 * BRE_init)
-    for i in range(num_steps):
+    for _ in range(num_steps):
         cur_B = newtons(cur_B, train_err, BRE_init)
     return cur_B
 
