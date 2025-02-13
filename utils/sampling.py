@@ -171,6 +171,7 @@ def sample_activations_kron_fast(
     
     m = G.shape[0]
     n = A.shape[0]
+    #print(m, n, q_mu.size())
 
     # -- 1. Compute B's mean directly: B_mean = X @ W_mu
     B_mean = X @ q_mu.T  # shape (M x n)

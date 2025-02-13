@@ -31,7 +31,7 @@ class BayesianNN(nn.Module):
         assert len(init_q_weights) == 3, f"Number of posterior weights must be 3, got {len(init_q_weights)}"
         
         self.approx = approx
-        self.p_log_sigma = nn.Parameter(torch.tensor(-1.16, dtype=torch.float32))
+        self.p_log_sigma = nn.Parameter(torch.tensor(-1.16, dtype=torch.float32), requires_grad =False)
         
 
         self.in_features = in_features

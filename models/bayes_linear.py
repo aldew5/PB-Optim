@@ -13,7 +13,7 @@ class BayesianLinear(nn.Module):
                  init_p: tuple[torch.Tensor, torch.Tensor],
                  init_q: tuple[torch.Tensor, torch.Tensor],
                  id: int,
-                 approx="diagonal",
+                 approx="diag",
                  init_value=1e-2,
                  lam: int = 1e-1,
                  damping= 1e-2):
@@ -139,14 +139,17 @@ class BayesianLinear(nn.Module):
             #weights = 0
             #for _ in range(num_samples):
             #   weights += 1/num_samples * sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
-            
+            #print("PLOGSIGMA", p_log_sigma)
+
             # compute KL between kfactored posterior and diagonal prior
             kl = self.kl_divergence_kfac(self.p_mu, p_sigma, self.q_mu, flag)
             
             #weights = sample_from_kron_dist_fast(self.q_mu, self._A, self._G).view(self.out_features, self.in_features + 1)
             # outputs = F.linear(x, weights, torch.zeros(self.out_features))
             # sample activations instead of weights (Kingma et al, 2015)
-            outputs = sample_activations_kron_fast(self.q_mu, x, self._A, self._G)
+            outputs = 0
+            for _ in range(num_samples):
+                outputs += 1/num_samples * sample_activations_kron_fast(self.q_mu, x, self._A, self._G)
 
         # diagonal approximation
         else:
@@ -175,6 +178,7 @@ class BayesianLinear(nn.Module):
         """
         kl = None
         p_sigma = torch.exp(p_log_sigma)
+        
         if self.approx == 'diag':
             q_sigma = torch.exp(self.q_log_sigma)
             kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
@@ -183,7 +187,7 @@ class BayesianLinear(nn.Module):
         
         return kl
     
-    def kl_divergence_kfac(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-2):
+    def kl_divergence_kfac(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-1):
         """
         Compute the KL divergence between a diagonal Gaussian prior and a Kronecker-factored Gaussian posterior.
 
@@ -227,13 +231,12 @@ class BayesianLinear(nn.Module):
         inv_dG = 1.0 / dG
         G_inv = Q_G @ torch.diag(inv_dG) @ Q_G.T
         
-
         # log(det(prior)) = n * log(p_sigma^2)
         log_det_prior = n * m* torch.log(p_sigma**2)
         
         # trace_term = trace(A) * trace(G) / p_sigma^2
         # but trace(A) = sum(dA), trace(G) = sum(dG)
-        trace_term = torch.trace(A) * torch.trace(G) / (p_sigma**2)
+        trace_term = torch.trace(A_inv) * torch.trace(G_inv) / (p_sigma**2)
         
         # (q_weight_mu - p_weight_mu) is shaped (m*n,)
         delta_mu = q_weight_mu - p_mu
@@ -244,6 +247,8 @@ class BayesianLinear(nn.Module):
         inside = delta_mu_reshaped @ A_inv @ delta_mu_reshaped.T
         quadratic_term = torch.trace(G_inv @ inside)
 
+        #print("PSIGMA", p_sigma)
+        #print(log_det_A, log_det_G, log_det_prior, trace_term, quadratic_term)
         # This matches the original formula:
         # 0.5 * ((log_det_A + n*log_det_G - log_det_prior - m*n) 
         #        + trace_term + quadratic_term)
@@ -252,7 +257,9 @@ class BayesianLinear(nn.Module):
             + trace_term
             + quadratic_term
         )
-
+        
+        #print("KL:", kl)
+        #print("Before rounding", kl)
         # handling unstable KL 
         if kl < 0:
             kl = 0
@@ -261,7 +268,7 @@ class BayesianLinear(nn.Module):
         else:
             self.prev_kl = kl
         
-        print(kl)
+        #print(kl)
         return kl
     
     def kl_normal_diag(self, p_mu, p_sigma, q_mu, q_sigma):

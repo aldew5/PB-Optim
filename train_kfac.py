@@ -72,7 +72,7 @@ trainloader, testloader = get_bMNIST(batch_size=100)
 w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
 w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 
-net = BayesianNN(w0, w1, p_log_sigma=-6,  approx='kfac').to(device)
+net = BayesianNN(w0, w1, p_log_sigma=-1.16,  approx='kfac').to(device)
 # init optimizer and lr scheduler
 optim_name = args.optimizer.lower()
 tag = optim_name
