@@ -2,7 +2,8 @@ import torch
 import torch.optim as optim
 from models.bayes_linear import BayesianLinear
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+# TODO: NOT a completed module.
 
 
 class NoisyKFAC(optim.Optimizer):

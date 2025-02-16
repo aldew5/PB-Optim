@@ -12,13 +12,15 @@ params = {"count": 0, "beta1": 1e-2, "lam": 1e-1}
 bce_loss = nn.BCEWithLogitsLoss()
 
 
-def update_G(module, grad_input, grad_output):
-    """
-    Hook to compute and store G (gradient covariance) for a given layer.
-    """
-    if params['count'] % 50 == 0:
-        grad = grad_output[0].detach()
-        module._G = (1 - params['beta1']) * module._G  + params['beta1'] * grad.T @ grad / grad.size(0)
+# Hook for computing G with KFAC
+#def update_G(module, grad_input, grad_output):
+#    """
+#    Hook to compute and store G (gradient covariance) for a given layer.
+#    """
+#    if params['count'] % 50 == 0:
+#        grad = grad_output[0].detach()
+#        module._G = (1 - params['beta1']) * module._G  + params['beta1'] * grad.T @ grad / grad.size(0)
+
 
 def train(model: nn.Module,
           num_epochs: int, 

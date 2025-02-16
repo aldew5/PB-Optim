@@ -25,7 +25,7 @@ w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 # prior mean: w0 (MLP random init)
 # prior var: lambda = e^{-6}
 # posterior mean: w1 (MLP learned weights)
-bnn_model = BayesianNN(w0, w1, p_log_sigma=-6,  approx='diag').to(device)
+bnn_model = BayesianNN(w0, w1, p_log_sigma=-6,  approx='diagonal').to(device)
 
 # Hyperparameters
 epochs = 10

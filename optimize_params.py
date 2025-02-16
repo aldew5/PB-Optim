@@ -6,7 +6,7 @@ from train_kfac import train
 from utils.pac_bayes_loss import pac_bayes_loss
 from utils.config import *
 from models.bnn import BayesianNN
-from optimizers.kfac3 import KFACOptimizer
+from optimizers.kfac import KFACOptimizer
 from bayes_opt import BayesianOptimization
 
 
@@ -23,7 +23,7 @@ def train_and_eval(lr=0.01, damping=2e-3, weight_decay=0, epochs=10):
     w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
     w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 
-    net = BayesianNN(w0, w1, p_log_sigma=-6,  approx='diag').to(device)
+    net = BayesianNN(w0, w1, p_log_sigma=-6,  approx='diagonal').to(device)
     net.train()
 
     optimizer = KFACOptimizer(net, lr=lr, damping=damping, weight_decay=weight_decay)

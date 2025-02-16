@@ -2,9 +2,6 @@
 
 import torch
 from torch.optim.lr_scheduler import StepLR
-from singd.optim.optimizer import SINGD
-
-import math
 from pathlib import Path
 
 from data.dataloader import get_bMNIST

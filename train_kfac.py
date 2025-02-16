@@ -1,6 +1,6 @@
 import argparse
 import os
-from optimizers.kfac3 import KFACOptimizer
+from optimizers.kfac import KFACOptimizer
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,7 +14,6 @@ from utils.pac_bayes_loss import pac_bayes_loss
 from utils.evaluate import evaluate_BNN
 from utils.config import *
 import matplotlib.pyplot as plt
-from utils.newtons import pac_bound
 
 
 # fetch args

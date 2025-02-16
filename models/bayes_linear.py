@@ -179,7 +179,7 @@ class BayesianLinear(nn.Module):
         kl = None
         p_sigma = torch.exp(p_log_sigma)
         
-        if self.approx == 'diag':
+        if self.approx == 'diagonal':
             q_sigma = torch.exp(self.q_log_sigma)
             kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
         else:
