@@ -1,6 +1,7 @@
 import argparse
 import os
 from optimizers.kfac import KFACOptimizer
+from optimizers.noisy_kfac import NoisyKFAC
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -10,7 +11,7 @@ from models.bnn import BayesianNN
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 from data.dataloader import get_bMNIST
-from utils.pac_bayes_loss import pac_bayes_loss
+from utils.pac_bayes_loss import pac_bayes_loss2
 from utils.evaluate import evaluate_BNN
 from utils.config import *
 import matplotlib.pyplot as plt
@@ -49,9 +50,9 @@ parser.add_argument('--stat_decay', default=0.95, type=float)
 parser.add_argument('--damping', default=1e-3, type=float)
 parser.add_argument('--kl_clip', default=1e-2, type=float)
 parser.add_argument('--weight_decay', default=3e-3, type=float)
-parser.add_argument('--TCov', default=10, type=int)
+parser.add_argument('--T_stats', default=10, type=int)
 parser.add_argument('--TScal', default=10, type=int)
-parser.add_argument('--TInv', default=100, type=int)
+parser.add_argument('--T_inv', default=100, type=int)
 
 parser.add_argument('--prefix', default=None, type=str)
 args = parser.parse_args()
@@ -83,14 +84,16 @@ if optim_name == 'sgd':
 elif optim_name == 'kfac':
     # optimal params for diagonal
     optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
+    #optimizer = NoisyKFAC(net, T_stats=10, T_inv=100,  lr=0.019908763029878117, damping=0.09398758455968932, 
+    #                      weight_decay=0, N=len(trainloader))
                               #lr=args.learning_rate,
                               ##momentum=args.momentum,
                               #stat_decay=args.stat_decay,
                               #damping=args.damping,
                               #kl_clip=args.kl_clip,
                               #weight_decay=args.weight_decay,
-                              #TCov=args.TCov,
-                              #TInv=args.TInv)
+                              #T_stats=args.T_stats,
+                              #T_inv=args.T_inv)
 else:
     raise NotImplementedError
 
@@ -125,8 +128,7 @@ if not os.path.isdir(log_dir):
 writer = SummaryWriter(log_dir)
 kls, bces, errs, bounds, losses = [], [], [], [], []
 
-def pac_bayes_loss2(outputs, labels):
-    return pac_bayes_loss(outputs, labels, m, b, c, pi, delta)
+
 
 
 def train(epoch, optimizer, net):
@@ -161,7 +163,7 @@ def train(epoch, optimizer, net):
         optimizer.acc_stats = True
         
         # for updating the kfactors
-        if optim_name in ['kfac', 'ekfac'] and optimizer.steps % optimizer.TCov == 0:
+        if optim_name in ['kfac', 'ekfac'] and optimizer.steps % optimizer.T_stats == 0:
             # compute true fisher
             optimizer.acc_stats = True
             with torch.no_grad():

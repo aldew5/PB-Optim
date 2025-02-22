@@ -2,6 +2,7 @@
 
 import torch
 import torch.optim as optim
+from optimizers.noisy_kfac import NoisyKFAC
 from torch.optim.lr_scheduler import StepLR
 from pathlib import Path
 
@@ -35,7 +36,8 @@ damping = 1e-1
 
 
 # Training
-optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
+#optimizer = optim.Adam(bnn_model.parameters(), lr=learning_rate)
+optimizer = optimizer =NoisyKFAC(bnn_model, t_stats=10, t_inv=100,  lr=0.019908763029878117, eps=0.09398758455968932, weight_decay=0)
 scheduler = StepLR(optimizer, step_size=30, gamma=1.0)  # Decay by 0.5 every 10 epochs
 trainloader, testloader = get_bMNIST(batch_size)
 

@@ -13,10 +13,8 @@ class BayesianLinear(nn.Module):
                  init_p: tuple[torch.Tensor, torch.Tensor],
                  init_q: tuple[torch.Tensor, torch.Tensor],
                  id: int,
-                 approx="diag",
-                 init_value=1e-2,
-                 lam: int = 1e-1,
-                 damping= 1e-2):
+                 approx="diagonal",
+                 init_value=1e-2):
         """Bayesian Linear Layer.
 
         Args:
@@ -42,52 +40,47 @@ class BayesianLinear(nn.Module):
         self.out_features = out_features
 
         # init prior
-        self.p_weight_mu = nn.Parameter(init_p["weight"], requires_grad=False)
-        self.p_bias_mu = nn.Parameter(init_p["bias"], requires_grad=False)
+        ##elf.p_weight_mu = nn.Parameter(init_p["weight"], requires_grad=False)
+        #s#elf.p_bias_mu = nn.Parameter(init_p["bias"], requires_grad=False)
         
 
         # for use in optimizer. will store gradients and A, G for momentum updates
         self.id = id
 
-        self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1)) 
         self.p_mu = nn.Parameter(torch.cat((init_p["weight"], init_p['bias'].unsqueeze(1)), dim=1), requires_grad=False)  
         self.q_bias_mu = None
 
         self.training = True
         self.prev_kl = None
+        self.bias = None
 
         # TODO: does not currently work
         if self.approx == 'noisy-kfac':
             # F \approx A \otimes G
-            self._A = (init_value * torch.eye(self.in_features)).double() #+ regularization * torch.eye(self.in_features)
-            self._G = (init_value * torch.eye(self.out_features)).double() #+ regularization * torch.eye(self.out_features)
-            self.A_inv, self.G_inv = None, None
-            #self.q_bias_cov = nn.Parameter(init_value * torch.eye(self.out_features) + regularization * torch.eye(self.out_features))
-            self.q_bias_log_sigma = nn.Parameter(0.5 * torch.log(torch.abs(self.q_bias_mu)))  
-            self.q_weight_mu = init_q["weight"].detach().clone()
-            # initialize weights as MLP weights 
+            self._A = init_value * torch.eye(self.in_features + 1)  #+ regularization * torch.eye(self.in_features)
+            self._G = init_value * torch.eye(self.out_features) #+ regularization * torch.eye(self.out_features)\
+
+            self.A_inv, self.G_inv = 1/init_value * torch.eye(self.in_features + 1), 1/init_value * torch.eye(self.out_features)
+            # initialize weights as MLP weights (we will compute gradients wrt weights)
             self.weights =  nn.Parameter(init_q["weight"])
-            
-            self.lam = lam
-            # iteration number for updating kronecker factors
-            self.k = 0
-            self.damping = damping
+            self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1), requires_grad=False) 
+
             
         elif self.approx == 'kfac':
             # we include the bias term in A
-            self._A = (init_value * torch.eye(self.in_features + 1))
-            self._G = (init_value * torch.eye(self.out_features))
-            self.A_inv, self.G_inv = None, None
-            self.log_det_A, self.log_det_G = None, None
+            self._A = init_value * torch.eye(self.in_features + 1)
+            self._G = init_value * torch.eye(self.out_features)
+            self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1)) 
 
         else:
+            self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1)) 
             self.q_log_sigma = nn.Parameter(torch.cat((0.5 * torch.log(torch.abs(init_q["weight"])), \
                                                    0.5 * torch.log(torch.abs(init_q["bias"])).unsqueeze(1)), dim=1)) 
             self.q_bias_mu = None
             
 
 
-    def forward(self, x, p_log_sigma, flag, T_stats=20, beta_1=0.9, num_samples=4):
+    def forward(self, x, p_log_sigma, flag, T_stats=20, beta_1=0.9, num_samples=5):
         """
             params:
                 - k: current iteration number
@@ -95,39 +88,15 @@ class BayesianLinear(nn.Module):
         """
         kl, outputs = None, None
         if self.approx == 'noisy-kfac':
-            batch_size = x.size(0)
+            x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1)
+            # prior std
             p_sigma = torch.exp(p_log_sigma)
-            q_bias_sigma = torch.exp(self.q_bias_log_sigma)
-            gamma_in = self.lam/batch_size
 
-            # compute inverses on the first iteration
-            if self.k == 0:
-                self.A_inv, self.G_inv = self._noisy_inversion(p_log_sigma, batch_size)
-            
-            
-            row_cov = self.G_inv + self.damping * torch.eye(self._G.size(0))
-            col_cov = gamma_in * self.A_inv + self.damping * torch.eye(self._A.size(0))
-            # sample weights from matrix-variate normal distr parameterized with kronecker layer factors
-            with torch.no_grad():
-                self.weights.data = nn.Parameter(sample_mvnd(self.q_weight_mu, row_cov, col_cov))
+            kl = self.kl_divergence_kfac(self.p_mu, p_sigma, self.q_mu, flag)
 
-            bias = self.q_bias_mu + q_bias_sigma * torch.randn_like(q_bias_sigma)
-
-            kl_weight = self.kl_divergence_kfac(self.p_weight_mu, p_sigma, self.q_weight_mu, flag)
-            kl_bias = self.kl_normal_diag(self.p_bias_mu, p_sigma, self.q_bias_mu, q_bias_sigma)
-            kl = kl_weight + kl_bias
-
-            outputs = F.linear(x.double(), self.weights.double(), bias.double())
-
-            # update A every T_stats iterations
-            if  self.k % T_stats == 0:
-                # batch size x input_dim
-                activations = x.clone().detach()
-                # update kfactors using activations from the previous layer
-                self._A = (1 - beta_1) * self._A  + beta_1 * activations.T @ activations / activations.size(0) 
-                self.A_inv, self.G_inv = self._noisy_inversion(p_log_sigma, batch_size)
-                
-            self.k += 1
+            # sample the weights from MN(q_mu, lambda/N A^{-1}, G^{-1})
+            self.weights.data = current_sampling(self.q_mu, self.A_inv, self.G_inv).view(self.out_features, self.in_features + 1)
+            outputs = F.linear(x, self.weights, torch.zeros(self.out_features))
         
         # kfactored posterior approximation
         elif self.approx == 'kfac':
@@ -281,24 +250,28 @@ class BayesianLinear(nn.Module):
             torch.log(p_sigma) - torch.log(q_sigma) + (q_sigma**2 + (p_mu - q_mu)**2) / (2 * p_sigma**2) - 0.5
         )
 
-    
-    def _noisy_inversion(self, p_log_sigma, batch_size, damping=1e-2):
-        """
-        Computes the inverses of A and G.
+   
 
-        params:
-            - p_log_sigma: log prior standard deviation
-        """
-        nu = torch.exp(2 * p_log_sigma)
-        lam_scaled = torch.clamp(torch.tensor(math.sqrt(self.lam / (batch_size * nu))), min=1e-2)
-        damp2 = (damping + lam_scaled) * torch.eye(self._G.size(0))
-        damp1 = (damping + lam_scaled) * torch.eye(self._A.size(0))
-        A, G = self._A + damp1, self._G + damp2
-        
 
-        # TODO: ignoring pi_l
-        G_inv = torch.linalg.inv(G).double()
-        A_inv = torch.linalg.inv(A).double()
-        
-        return A_inv, G_inv
+    """
+        def _noisy_inversion(self, p_log_sigma, batch_size, damping=1e-2):
+            #""
+            Computes the inverses of A and G.
+
+            params:
+                - p_log_sigma: log prior standard deviation
+            #""
+            nu = torch.exp(2 * p_log_sigma)
+            lam_scaled = torch.clamp(torch.tensor(math.sqrt(self.lam / (batch_size * nu))), min=1e-2)
+            damp2 = (damping + lam_scaled) * torch.eye(self._G.size(0))
+            damp1 = (damping + lam_scaled) * torch.eye(self._A.size(0))
+            A, G = self._A + damp1, self._G + damp2
+            
+
+            # TODO: ignoring pi_l
+            G_inv = torch.linalg.inv(G).double()
+            A_inv = torch.linalg.inv(A).double()
+            
+            return A_inv, G_inv
+        """
 

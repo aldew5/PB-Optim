@@ -46,6 +46,7 @@ class BayesianNN(nn.Module):
 
         self.layers = [self.bl1, self.bl2, self.bl3]
         self.flag = "train" # updated for eval
+    
 
 
     def forward(self, x, p_log_sigma=None):
@@ -72,4 +73,4 @@ class BayesianNN(nn.Module):
         
         return self.bl1.kl_divergence(p_log_sigma=p_log_sigma, flag=self.flag) + self.bl2.kl_divergence(p_log_sigma=p_log_sigma, flag=self.flag) +\
                 self.bl3.kl_divergence(p_log_sigma=p_log_sigma, flag=self.flag)
-     
+    
