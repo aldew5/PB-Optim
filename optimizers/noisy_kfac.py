@@ -10,7 +10,7 @@ class NoisyKFAC(optim.Optimizer):
             model,
             N,
             lr=0.01, 
-            damping=1e-1, 
+            damping=1e-2, 
             beta: float = 1e-2,
             weight_decay: float = 1e-4,
             momentum=0.9, # for updating kfactors
@@ -34,6 +34,7 @@ class NoisyKFAC(optim.Optimizer):
         self.d_a, self.d_g = {}, {}
         self.steps = 0
         self.beta = beta
+        self.eta = eta
 
         self.CovAHandler = ComputeCovA()
         self.CovGHandler = ComputeCovG()
@@ -99,7 +100,7 @@ class NoisyKFAC(optim.Optimizer):
         :param damping: damp the inverse calculation
         :return: no returns.
         """
-        eps = 1e-10  # for numerical stability
+        eps = 1e-5  # for numerical stability
         self.d_a[layer], self.Q_a[layer] = torch.linalg.eigh(
                 self.m_aa[layer], UPLO='U'
             )
@@ -131,7 +132,8 @@ class NoisyKFAC(optim.Optimizer):
             vg_sum += (v[0] * m.weights.grad.data * lr ** 2).sum().item()
             #if m.q_bias_mu is not None:
             #    vg_sum += (v[1] * m.q_bias_mu.grad.data * lr ** 2).sum().item()
-        nu = 1.0 if vg_sum == 0 else min(1.0, math.sqrt(self.kl_clip / vg_sum)) 
+        #print(vg_sum, self.kl_clip)
+        nu = 1.0 if vg_sum <= 0 else min(1.0, math.sqrt(self.kl_clip / vg_sum)) 
         
         # update grad with nu
         for m in self.modules:
@@ -167,7 +169,7 @@ class NoisyKFAC(optim.Optimizer):
         """
         # p_grad_mat is of output_dim * input_dim
         # inv((ss')) p_grad_mat inv(aa') = [ Q_g (1/R_g) Q_g^T ] @ p_grad_mat @ [Q_a (1/R_a) Q_a^T]
-        v1 = self.Q_g[m].t() @ (p_grad_mat- self.lam * m.weights) @ self.Q_a[m]
+        v1 = self.Q_g[m].t() @ (p_grad_mat- self.lam/(self.N * self.eta) * m.weights) @ self.Q_a[m]
         v2 = v1 / (self.d_g[m].unsqueeze(1) * self.d_a[m].unsqueeze(0) + damping)
         v = self.Q_g[m] @ v2 @ self.Q_a[m].t()
         v = [v.view(m.weights.grad.data.size())]

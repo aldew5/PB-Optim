@@ -72,7 +72,7 @@ trainloader, testloader = get_bMNIST(batch_size=100)
 w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
 w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 
-net = BayesianNN(w0, w1, p_log_sigma=-1.16,  approx='kfac').to(device)
+net = BayesianNN(w0, w1, p_log_sigma=-1.16,  approx='noisy-kfac').to(device)
 # init optimizer and lr scheduler
 optim_name = args.optimizer.lower()
 tag = optim_name
@@ -83,9 +83,9 @@ if optim_name == 'sgd':
                           weight_decay=args.weight_decay)
 elif optim_name == 'kfac':
     # optimal params for diagonal
-    optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
-    #optimizer = NoisyKFAC(net, T_stats=10, T_inv=100,  lr=0.019908763029878117, damping=0.09398758455968932, 
-    #                      weight_decay=0, N=len(trainloader))
+    #optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
+    optimizer = NoisyKFAC(net, T_stats=10, T_inv=100,  lr=0.019908763029878117, damping=0.09398758455968932, 
+                          weight_decay=0, N=len(trainloader))
                               #lr=args.learning_rate,
                               ##momentum=args.momentum,
                               #stat_decay=args.stat_decay,
@@ -170,6 +170,7 @@ def train(epoch, optimizer, net):
                 sampled_y = torch.multinomial(torch.nn.functional.softmax(outputs[0].data, dim=1),
                                               1).squeeze().float()
             loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1))
+            loss_sample = bce_loss(outputs[0], sampled_y.unsqueeze(1))
             loss_sample.backward(retain_graph=True)
             optimizer.acc_stats = False
             optimizer.zero_grad()  # clear the gradient for computing true-fisher.
@@ -210,6 +211,7 @@ def test(epoch, net):
             inputs, targets = inputs.to(device), targets.to(device).float().view(-1, 1)
             outputs = net(inputs)
             loss = pac_bayes_loss2(outputs, targets)
+            #loss = bce_loss(outputs[0], targets)
 
             test_loss += loss.item()
             preds = torch.round(torch.sigmoid(outputs[0]))

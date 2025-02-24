@@ -54,6 +54,8 @@ class BayesianLinear(nn.Module):
         self.prev_kl = None
         self.bias = None
 
+        self.A_inv, self.G_inv = None, None
+
         # TODO: does not currently work
         if self.approx == 'noisy-kfac':
             # F \approx A \otimes G
@@ -95,7 +97,7 @@ class BayesianLinear(nn.Module):
             kl = self.kl_divergence_kfac(self.p_mu, p_sigma, self.q_mu, flag)
 
             # sample the weights from MN(q_mu, lambda/N A^{-1}, G^{-1})
-            self.weights.data = current_sampling(self.q_mu, self.A_inv, self.G_inv).view(self.out_features, self.in_features + 1)
+            self.weights.data = self.q_mu#current_sampling(self.q_mu, self.A_inv, self.G_inv).view(self.out_features, self.in_features + 1)
             outputs = F.linear(x, self.weights, torch.zeros(self.out_features))
         
         # kfactored posterior approximation
@@ -157,6 +159,7 @@ class BayesianLinear(nn.Module):
         return kl
     
     def kl_divergence_kfac(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-1):
+        #NOTE: make sure the eps aligns with clamping param in kfac/noisy-kfac
         """
         Compute the KL divergence between a diagonal Gaussian prior and a Kronecker-factored Gaussian posterior.
 
@@ -174,10 +177,10 @@ class BayesianLinear(nn.Module):
         n, m = A.shape[0], G.shape[0]
 
         
-        trace_A = torch.trace(A)
-        trace_G = torch.trace(G)
-        A = A / (trace_A + epsilon)
-        G = G / (trace_G + epsilon)
+        #trace_A = torch.trace(A)
+        #trace_G = torch.trace(G)
+        #A = A / (trace_A + epsilon)
+        #G = G / (trace_G + epsilon)
         
         A = A + torch.eye(n, device=A.device) * epsilon
         G = G + torch.eye(m, device=G.device) * epsilon
@@ -189,7 +192,8 @@ class BayesianLinear(nn.Module):
         log_det_A = torch.sum(torch.log(dA))
         # Inverse of A  = Q_A @ diag(1/dA) @ Q_A^T
         inv_dA = 1.0 / dA
-        A_inv = Q_A @ torch.diag(inv_dA) @ Q_A.T
+        A_inv = self.A_inv if self.A_inv is not None else Q_A @ torch.diag(inv_dA) @ Q_A.T
+        #A_inv = Q_A @ torch.diag(inv_dA) @ Q_A.T
         
         dG, Q_G = torch.linalg.eigh(G)  # or torch.symeig(G, eigenvectors=True)
         dG = torch.clamp(dG, min=epsilon)
@@ -198,10 +202,12 @@ class BayesianLinear(nn.Module):
         log_det_G = torch.sum(torch.log(dG))
         # Inverse of G  = Q_G @ diag(1/dG) @ Q_G^T
         inv_dG = 1.0 / dG
-        G_inv = Q_G @ torch.diag(inv_dG) @ Q_G.T
+        G_inv = self.G_inv if self.G_inv is not None else Q_G @ torch.diag(inv_dG) @ Q_G.T
+        #G_inv = Q_G @ torch.diag(inv_dG) @ Q_G.T
         
         # log(det(prior)) = n * log(p_sigma^2)
-        log_det_prior = n * m* torch.log(p_sigma**2)
+        log_det_prior = n * m * torch.log(p_sigma**2)
+        #print(A_inv @self._A, G_inv @ self._G)
         
         # trace_term = trace(A) * trace(G) / p_sigma^2
         # but trace(A) = sum(dA), trace(G) = sum(dG)
@@ -228,7 +234,7 @@ class BayesianLinear(nn.Module):
         )
         
         #print("KL:", kl)
-        #print("Before rounding", kl)
+        print("Before rounding", kl)
         # handling unstable KL 
         if kl < 0:
             kl = 0
