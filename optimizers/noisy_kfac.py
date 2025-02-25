@@ -20,7 +20,8 @@ class NoisyKFAC(optim.Optimizer):
             T_stats=10,
             T_inv=100,
             gamma_ex=1e-3,
-            batch_averaged=True
+            batch_averaged=True,
+            precision="float32"
         ):
         params = [p for p in model.parameters() if p.requires_grad]
         defaults = dict(lr=lr, momentum=momentum, damping=damping,
@@ -45,6 +46,7 @@ class NoisyKFAC(optim.Optimizer):
         self.lam = lam
         self.N = N
         self.kl_clip = kl_clip
+        self.precision = precision
 
         # only for kfac-enabled BNNs
         #assert(model.kfac)
@@ -71,11 +73,11 @@ class NoisyKFAC(optim.Optimizer):
         if torch.is_grad_enabled() and self.steps % self.T_stats == 0:
             aa = self.CovAHandler(input[0].data, module)
             # give the model access to kfactors
-            module._A = aa
+            #module._A = self.lam/self.N * aa
             # Initialize buffers
             if self.steps == 0:
                 self.m_aa[module] = torch.diag(aa.new(aa.size(0)).fill_(1))
-            update_running_stat(aa, self.m_aa[module], self.beta)
+            update_running_stat(aa, self.m_aa[module], self.beta, module, "A")
 
     def _save_grad_output(self, module, grad_input, grad_output):
         """
@@ -88,11 +90,11 @@ class NoisyKFAC(optim.Optimizer):
         if self.acc_stats and self.steps % self.T_stats == 0:
             gg = self.CovGHandler(grad_output[0].data, module, self.batch_averaged)
             # give the model access to the kfactors
-            module._G = gg
+            #module._G = gg
             # Initialize buffers
             if self.steps == 0:
                 self.m_gg[module] = torch.diag(gg.new(gg.size(0)).fill_(1))
-            update_running_stat(gg, self.m_gg[module], self.beta)
+            update_running_stat(gg, self.m_gg[module], self.beta, module, "G")
 
     def _update_inv(self, layer, damping):
         """Do eigen decomposition for computing inverse of the ~ fisher.
@@ -107,6 +109,10 @@ class NoisyKFAC(optim.Optimizer):
         self.d_g[layer], self.Q_g[layer] = torch.linalg.eigh(
                 self.m_gg[layer], UPLO='U'
             )
+        self.d_a[layer] = self.d_a[layer].type(getattr(torch, self.precision))
+        self.d_g[layer] = self.d_g[layer].type(getattr(torch, self.precision))
+        self.Q_a[layer] = self.Q_a[layer].type(getattr(torch, self.precision))
+        self.Q_g[layer] = self.Q_g[layer].type(getattr(torch, self.precision))
 
         self.d_a[layer].mul_((self.d_a[layer] > eps).float())
         self.d_g[layer].mul_((self.d_g[layer] > eps).float())
@@ -169,6 +175,8 @@ class NoisyKFAC(optim.Optimizer):
         """
         # p_grad_mat is of output_dim * input_dim
         # inv((ss')) p_grad_mat inv(aa') = [ Q_g (1/R_g) Q_g^T ] @ p_grad_mat @ [Q_a (1/R_a) Q_a^T]
+        #(#self.Q_a[m] = self.Q_a[m].type(getattr(torch, self.precision))
+        #print(self.Q[m].dtype)
         v1 = self.Q_g[m].t() @ (p_grad_mat- self.lam/(self.N * self.eta) * m.weights) @ self.Q_a[m]
         v2 = v1 / (self.d_g[m].unsqueeze(1) * self.d_a[m].unsqueeze(0) + damping)
         v = self.Q_g[m] @ v2 @ self.Q_a[m].t()

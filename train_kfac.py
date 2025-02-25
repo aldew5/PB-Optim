@@ -15,46 +15,9 @@ from utils.pac_bayes_loss import pac_bayes_loss2
 from utils.evaluate import evaluate_BNN
 from utils.config import *
 import matplotlib.pyplot as plt
+from utils.args_parser import ArgsParser
 
-
-# fetch args
-parser = argparse.ArgumentParser()
-
-
-parser.add_argument('--network', default='vgg16_bn', type=str)
-parser.add_argument('--depth', default=19, type=int)
-parser.add_argument('--dataset', default='cifar10', type=str)
-
-# densenet
-parser.add_argument('--growthRate', default=12, type=int)
-parser.add_argument('--compressionRate', default=2, type=int)
-
-# wrn, densenet
-parser.add_argument('--widen_factor', default=1, type=int)
-parser.add_argument('--dropRate', default=0.0, type=float)
-
-
-parser.add_argument('--device', default='cuda', type=str)
-parser.add_argument('--resume', '-r', action='store_true')
-parser.add_argument('--load_path', default='', type=str)
-parser.add_argument('--log_dir', default='runs/pretrain', type=str)
-
-
-parser.add_argument('--optimizer', default='kfac', type=str)
-parser.add_argument('--batch_size', default=64, type=float)
-parser.add_argument('--epoch', default=1, type=int)
-parser.add_argument('--milestone', default=None, type=str)
-parser.add_argument('--learning_rate', default=0.001, type=float)
-parser.add_argument('--momentum', default=0.9, type=float)
-parser.add_argument('--stat_decay', default=0.95, type=float)
-parser.add_argument('--damping', default=1e-3, type=float)
-parser.add_argument('--kl_clip', default=1e-2, type=float)
-parser.add_argument('--weight_decay', default=3e-3, type=float)
-parser.add_argument('--T_stats', default=10, type=int)
-parser.add_argument('--TScal', default=10, type=int)
-parser.add_argument('--T_inv', default=100, type=int)
-
-parser.add_argument('--prefix', default=None, type=str)
+parser = ArgsParser()
 args = parser.parse_args()
 
 # init model
@@ -67,12 +30,12 @@ nc = {
 num_classes = nc[args.dataset]
 
 # init dataloader
-trainloader, testloader = get_bMNIST(batch_size=100)
+trainloader, testloader = get_bMNIST(args.precision, batch_size=100)
 
 w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
 w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 
-net = BayesianNN(w0, w1, p_log_sigma=-1.16,  approx='noisy-kfac').to(device)
+net = BayesianNN(w0, w1, p_log_sigma=-1.16,  approx='noisy-kfac', precision=args.precision).to(device)
 # init optimizer and lr scheduler
 optim_name = args.optimizer.lower()
 tag = optim_name
@@ -85,7 +48,7 @@ elif optim_name == 'kfac':
     # optimal params for diagonal
     #optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
     optimizer = NoisyKFAC(net, T_stats=10, T_inv=100,  lr=0.019908763029878117, damping=0.09398758455968932, 
-                          weight_decay=0, N=len(trainloader))
+                          weight_decay=0, N=len(trainloader), precision=args.precision)
                               #lr=args.learning_rate,
                               ##momentum=args.momentum,
                               #stat_decay=args.stat_decay,
@@ -158,7 +121,8 @@ def train(epoch, optimizer, net):
         #preds = (torch.nn.functional.softmax(outputs.cpu().data, dim=1), 1).squeeze()
         #print(outputs[0])
   
-        loss = pac_bayes_loss2(outputs, targets)
+        #loss = pac_bayes_loss2(outputs, targets)
+        loss = bce_loss(outputs[0], targets)
 
         optimizer.acc_stats = True
         
@@ -169,7 +133,7 @@ def train(epoch, optimizer, net):
             with torch.no_grad():
                 sampled_y = torch.multinomial(torch.nn.functional.softmax(outputs[0].data, dim=1),
                                               1).squeeze().float()
-            loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1))
+            #loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1))
             loss_sample = bce_loss(outputs[0], sampled_y.unsqueeze(1))
             loss_sample.backward(retain_graph=True)
             optimizer.acc_stats = False

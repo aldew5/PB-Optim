@@ -42,6 +42,7 @@ class ArgsParser():
         parser.add_argument('--TCov', default=10, type=int)
         parser.add_argument('--TScal', default=10, type=int)
         parser.add_argument('--TInv', default=100, type=int)
+        parser.add_argument('--precision',default="float32", type=str)
 
         parser.add_argument('--prefix', default=None, type=str)
         

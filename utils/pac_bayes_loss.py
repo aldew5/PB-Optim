@@ -16,7 +16,7 @@ def pac_bayes_loss(outputs, labels, m, b, c, pi, delta):
     # TODO: the paper suggests a slightly different BRE
     val = torch.min(torch.sqrt(0.5 * BRE), BRE + torch.sqrt(BRE * (BRE + 2* bce_loss(preds, labels))))
 
-    print("KL:", kl)
+    #print("KL:", kl)
     # weak bound on KL^{-1}
     return bce_loss(preds, labels) + val
 

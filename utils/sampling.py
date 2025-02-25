@@ -87,7 +87,7 @@ def sample_from_kron_dist(q_mu, A, G, epsilon=1e-2):
     return samples
 
 
-def current_sampling(q_mu, A_inv, G_inv, epsilon=1e-2):
+def current_sampling(q_mu, A_inv, G_inv, epsilon=1e-2, precision="float32"):
     """
     Sample from a multivariate normal distribution
         N(q_mu, G^{-1} ⊗ A^{-1})
@@ -128,7 +128,9 @@ def current_sampling(q_mu, A_inv, G_inv, epsilon=1e-2):
     sqrt_G_inv = Q_G @ torch.diag(torch.sqrt(d_G)) @ Q_G.t()
     
     # Draw a standard normal sample Z of shape (m, n).
-    Z = torch.randn(m, n, device=A_inv.device)
+    Z = torch.randn(m, n, device=A_inv.device, dtype=getattr(torch, precision))
+    sqrt_A_inv, sqrt_G_inv = sqrt_A_inv.type(getattr(torch, precision)), sqrt_G_inv.type(getattr(torch, precision))
+    
     
     # Sample from the matrix normal:
     #   X = sqrt_G_inv @ Z @ sqrt_A_inv^T

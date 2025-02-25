@@ -13,7 +13,8 @@ class BayesianNN(nn.Module):
                  out_features: int = 1,
                  hidden_features: int = 300,
                  p_log_sigma: float = -1.16, #-6,
-                 approx="diagonal"):
+                 approx="diagonal",
+                 precision="float32"):
         """Bayesian Neural Network (BNN) model w/ 3 layers.
 
         Args:
@@ -33,16 +34,21 @@ class BayesianNN(nn.Module):
         self.approx = approx
         # TODO: fixed log sigma for now because it gets pushed too small if we let it vary
         # find closed form optimal?
-        self.p_log_sigma = nn.Parameter(torch.tensor(p_log_sigma, dtype=torch.float32), requires_grad =False)
+
+        if precision == "float32":
+            self.p_log_sigma = nn.Parameter(torch.tensor(p_log_sigma, dtype=torch.float32), requires_grad =False)
+        else:
+            self.p_log_sigma = nn.Parameter(torch.tensor(p_log_sigma, dtype=torch.float64), requires_grad =False)
+
         
 
         self.in_features = in_features
         self.out_features = out_features
         
         
-        self.bl1 = BayesianLinear(in_features, hidden_features, init_p_weights[0], init_q_weights[0], 1, approx=approx)
-        self.bl2 = BayesianLinear(hidden_features, hidden_features, init_p_weights[1], init_q_weights[1], 2, approx=approx)
-        self.bl3 = BayesianLinear(hidden_features, 1, init_p_weights[2], init_q_weights[2], 3, approx=approx)
+        self.bl1 = BayesianLinear(in_features, hidden_features, init_p_weights[0], init_q_weights[0], 1, approx=approx, precision=precision)
+        self.bl2 = BayesianLinear(hidden_features, hidden_features, init_p_weights[1], init_q_weights[1], 2, approx=approx, precision=precision)
+        self.bl3 = BayesianLinear(hidden_features, 1, init_p_weights[2], init_q_weights[2], 3, approx=approx, precision=precision)
 
         self.layers = [self.bl1, self.bl2, self.bl3]
         self.flag = "train" # updated for eval

@@ -14,7 +14,8 @@ class BayesianLinear(nn.Module):
                  init_q: tuple[torch.Tensor, torch.Tensor],
                  id: int,
                  approx="diagonal",
-                 init_value=1e-2):
+                 init_value=1e-2, 
+                 precision="float32"):
         """Bayesian Linear Layer.
 
         Args:
@@ -38,6 +39,7 @@ class BayesianLinear(nn.Module):
 
         self.in_features = in_features
         self.out_features = out_features
+        self.precision = precision
 
         # init prior
         ##elf.p_weight_mu = nn.Parameter(init_p["weight"], requires_grad=False)
@@ -47,7 +49,10 @@ class BayesianLinear(nn.Module):
         # for use in optimizer. will store gradients and A, G for momentum updates
         self.id = id
 
-        self.p_mu = nn.Parameter(torch.cat((init_p["weight"], init_p['bias'].unsqueeze(1)), dim=1), requires_grad=False)  
+        self.p_mu = nn.Parameter(
+                torch.cat((init_p["weight"].to(getattr(torch, precision)), init_p['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1), 
+                requires_grad=False
+            )  
         self.q_bias_mu = None
 
         self.training = True
@@ -59,46 +64,45 @@ class BayesianLinear(nn.Module):
         # TODO: does not currently work
         if self.approx == 'noisy-kfac':
             # F \approx A \otimes G
-            self._A = init_value * torch.eye(self.in_features + 1)  #+ regularization * torch.eye(self.in_features)
-            self._G = init_value * torch.eye(self.out_features) #+ regularization * torch.eye(self.out_features)\
+            self._A = init_value * torch.eye(self.in_features + 1, dtype=getattr(torch, precision))  #+ regularization * torch.eye(self.in_features)
+            self._G = init_value * torch.eye(self.out_features, dtype=getattr(torch, precision)) #+ regularization * torch.eye(self.out_features)\
 
-            self.A_inv, self.G_inv = 1/init_value * torch.eye(self.in_features + 1), 1/init_value * torch.eye(self.out_features)
+            self.A_inv = 1/init_value * torch.eye(self.in_features + 1, dtype=getattr(torch, precision))
+            self.G_inv = 1/init_value * torch.eye(self.out_features, dtype=getattr(torch, precision))
             # initialize weights as MLP weights (we will compute gradients wrt weights)
-            self.weights =  nn.Parameter(init_q["weight"])
-            self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1), requires_grad=False) 
+            self.weights =  nn.Parameter(init_q["weight"].to(torch.float64))
+            self.q_mu = nn.Parameter(torch.cat((init_q["weight"].to(getattr(torch, precision)), 
+                                                init_q['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1), 
+                                     requires_grad=False
+                                     ) 
 
             
         elif self.approx == 'kfac':
             # we include the bias term in A
             self._A = init_value * torch.eye(self.in_features + 1)
             self._G = init_value * torch.eye(self.out_features)
-            self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1)) 
+            self.q_mu = nn.Parameter(torch.cat((init_q["weight"].to(getattr(torch, precision)), 
+                                                init_q['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1)) 
 
         else:
             self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1)) 
-            self.q_log_sigma = nn.Parameter(torch.cat((0.5 * torch.log(torch.abs(init_q["weight"])), \
-                                                   0.5 * torch.log(torch.abs(init_q["bias"])).unsqueeze(1)), dim=1)) 
+            self.q_log_sigma = nn.Parameter(torch.cat((0.5 * torch.log(torch.abs(init_q["weight"].to(getattr(torch, precision)))), \
+                                                   0.5 * torch.log(torch.abs(init_q["bias"])).unsqueeze(1).to(getattr(torch, precision))), dim=1)) 
             self.q_bias_mu = None
             
 
 
-    def forward(self, x, p_log_sigma, flag, T_stats=20, beta_1=0.9, num_samples=5):
-        """
-            params:
-                - k: current iteration number
-                - T_stats: frequency of updating A
-        """
-        kl, outputs = None, None
+    def forward(self, x, p_log_sigma, flag, num_samples=5):
         if self.approx == 'noisy-kfac':
-            x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1)
+            x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1).type(getattr(torch, self.precision))
             # prior std
             p_sigma = torch.exp(p_log_sigma)
 
             kl = self.kl_divergence_kfac(self.p_mu, p_sigma, self.q_mu, flag)
 
             # sample the weights from MN(q_mu, lambda/N A^{-1}, G^{-1})
-            self.weights.data = self.q_mu#current_sampling(self.q_mu, self.A_inv, self.G_inv).view(self.out_features, self.in_features + 1)
-            outputs = F.linear(x, self.weights, torch.zeros(self.out_features))
+            self.weights.data = current_sampling(self.q_mu, self.A_inv, self.G_inv).view(self.out_features, self.in_features + 1)
+            outputs = F.linear(x, self.weights, torch.zeros(self.out_features).type(getattr(torch, self.precision)))
         
         # kfactored posterior approximation
         elif self.approx == 'kfac':
@@ -133,7 +137,7 @@ class BayesianLinear(nn.Module):
             weights = self.q_mu + q_sigma * torch.randn_like(q_sigma)
             kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
 
-            outputs = F.linear(x, weights, torch.zeros(self.out_features))
+            outputs = F.linear(x, weights, torch.zeros(self.out_features).type(getattr(torch, self.precision)))
 
         return outputs, kl
     
@@ -158,6 +162,7 @@ class BayesianLinear(nn.Module):
         
         return kl
     
+
     def kl_divergence_kfac(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-1):
         #NOTE: make sure the eps aligns with clamping param in kfac/noisy-kfac
         """
@@ -175,6 +180,7 @@ class BayesianLinear(nn.Module):
         # Retrieve the KFAC blocks from this class
         A, G = self._A, self._G
         n, m = A.shape[0], G.shape[0]
+        
 
         
         #trace_A = torch.trace(A)
@@ -211,16 +217,19 @@ class BayesianLinear(nn.Module):
         
         # trace_term = trace(A) * trace(G) / p_sigma^2
         # but trace(A) = sum(dA), trace(G) = sum(dG)
-        trace_term = torch.trace(A_inv) * torch.trace(G_inv) / (p_sigma**2)
+        trace_term = torch.trace(A_inv) * torch.trace(G_inv) * 1.0/(p_sigma**2)
         
         # (q_weight_mu - p_weight_mu) is shaped (m*n,)
-        delta_mu = q_weight_mu - p_mu
+        #delta_mu = q_weight_mu - p_mu
         # Reshape to (m, n) to match the Kronecker structure
-        delta_mu_reshaped = delta_mu.view(m, n)
+        #delta_mu_reshaped = delta_mu.view(m, n)
         
         # Quadratic term = trace(G_inv @ (delta_mu @ A_inv @ delta_mu^T))
-        inside = delta_mu_reshaped @ A_inv @ delta_mu_reshaped.T
-        quadratic_term = torch.trace(G_inv @ inside)
+        #inside = delta_mu_reshaped @ A_inv @ delta_mu_reshaped.T
+        #quadratic_term = torch.trace(G_inv @ inside)
+        diff = q_weight_mu - p_mu
+        quad_term = (1.0 / (p_sigma**2)) * torch.sum(diff**2)
+
 
         #print("PSIGMA", p_sigma)
         #print(log_det_A, log_det_G, log_det_prior, trace_term, quadratic_term)
@@ -228,22 +237,25 @@ class BayesianLinear(nn.Module):
         # 0.5 * ((log_det_A + n*log_det_G - log_det_prior - m*n) 
         #        + trace_term + quadratic_term)
         kl = 0.5 * (
-            (m*log_det_A + n * log_det_G - log_det_prior - m * n)
+            (m * log_det_A + n * log_det_G + log_det_prior - m * n)
             + trace_term
-            + quadratic_term
+            + quad_term
         )
+        #print("HERE", n, m)
+        #print(log_det_A, log_det_G, log_det_prior, trace_term, quad_term)
         
         #print("KL:", kl)
-        print("Before rounding", kl)
+        #print("Before rounding", kl)
         # handling unstable KL 
         if kl < 0:
-            kl = 0
-            if flag == 'eval': kl = self.prev_kl
+            kl = torch.tensor(0)
+            #if flag == 'eval': kl = self.prev_kl
             #if self.training: self.training = False
-        else:
-            self.prev_kl = kl
+        #else:
+        #    self.prev_kl = kl
         
         #print(kl)
+        #print("KL", kl)
         return kl
     
     def kl_normal_diag(self, p_mu, p_sigma, q_mu, q_sigma):
