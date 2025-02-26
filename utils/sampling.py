@@ -87,7 +87,7 @@ def sample_from_kron_dist(q_mu, A, G, epsilon=1e-2):
     return samples
 
 
-def current_sampling(q_mu, A_inv, G_inv, epsilon=1e-2, precision="float32"):
+def current_sampling(q_mu, A_inv, G_inv, lam, N, epsilon=1e-2, precision="float32"):
     """
     Sample from a multivariate normal distribution
         N(q_mu, G^{-1} ⊗ A^{-1})
@@ -110,10 +110,12 @@ def current_sampling(q_mu, A_inv, G_inv, epsilon=1e-2, precision="float32"):
     """
     # Ensure q_mu is a flat vector.
     q_mu = q_mu.view(-1)
-    
-    m = G_inv.shape[0]  # number of rows
-    n = A_inv.shape[0]  # number of columns
+    m = G_inv.shape[0] 
+    n = A_inv.shape[0] 
 
+    # in the first run the optimizer won't yet have calculated 
+    # sqrt_G_inv
+    
     # Compute eigen-decomposition of A_inv and G_inv.
     d_A, Q_A = torch.linalg.eigh(A_inv, UPLO='U')
     d_G, Q_G = torch.linalg.eigh(G_inv, UPLO='U')
@@ -124,17 +126,16 @@ def current_sampling(q_mu, A_inv, G_inv, epsilon=1e-2, precision="float32"):
     
     # Compute the square-root factors:
     # sqrt_A_inv such that sqrt_A_inv @ sqrt_A_inv^T = A_inv.
-    sqrt_A_inv = Q_A @ torch.diag(torch.sqrt(d_A)) @ Q_A.t()
-    sqrt_G_inv = Q_G @ torch.diag(torch.sqrt(d_G)) @ Q_G.t()
+    sqrt_A_inv = Q_A @ torch.diag(d_A.sign() * torch.sqrt(d_A.abs())) @ Q_A.t()
+    sqrt_G_inv = Q_G @ torch.diag(d_G.sign() * torch.sqrt(d_G.abs())) @ Q_G.t()
     
     # Draw a standard normal sample Z of shape (m, n).
     Z = torch.randn(m, n, device=A_inv.device, dtype=getattr(torch, precision))
     sqrt_A_inv, sqrt_G_inv = sqrt_A_inv.type(getattr(torch, precision)), sqrt_G_inv.type(getattr(torch, precision))
     
-    
     # Sample from the matrix normal:
     #   X = sqrt_G_inv @ Z @ sqrt_A_inv^T
-    X = sqrt_G_inv @ Z @ sqrt_A_inv.t()
+    X =  lam/N * sqrt_G_inv @ Z @ sqrt_A_inv.t()
     
     # Flatten X and add the mean.
     sample_vec = X.flatten() + q_mu

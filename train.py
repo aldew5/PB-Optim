@@ -37,7 +37,7 @@ if optim_name == 'sgd':
                           momentum=args.momentum,
                           weight_decay=args.weight_decay)
 elif optim_name == 'noisy-kfac':
-    optimizer = NoisyKFAC(net, T_stats=10, T_inv=100,  lr=0.019908763029878117, damping=0.09398758455968932, 
+    optimizer = NoisyKFAC(net, T_stats=1, T_inv=10,  lr=1e-3, damping=0.0001, 
                           weight_decay=0, N=len(trainloader), precision=args.precision)    
 elif optim_name == "kfac":
     optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
@@ -48,7 +48,7 @@ else:
 if args.milestone is None:
     #lr_scheduler = MultiStepLR(optimizer, milestones=[int(args.epoch*0.5), int(args.epoch*0.75)], gamma=0.1)
     #TODO: trivial scheduling for now
-    lr_scheduler = StepLR(optimizer, step_size=30, gamma=1)
+    lr_scheduler = StepLR(optimizer=optimizer, step_size=30, gamma=0.5)
 else:
     milestone = [int(_) for _ in args.milestone.split(',')]
     lr_scheduler = MultiStepLR(optimizer, milestones=milestone, gamma=0.1)

@@ -10,9 +10,9 @@ import math
 class NoisyKFAC(optim.Optimizer):
     def __init__(self, 
             model,
-            N,
+            N=60000,
             lr=0.01, 
-            damping=1e-2, 
+            damping=1, 
             beta: float = 1e-2,
             weight_decay: float = 1e-4,
             momentum=0.9, # for updating kfactors
@@ -102,10 +102,10 @@ class NoisyKFAC(optim.Optimizer):
         """
         eps = 1e-5  # for numerical stability
         self.d_a[layer], self.Q_a[layer] = torch.linalg.eigh(
-                self.m_aa[layer], UPLO='U'
+                self.m_aa[layer] + damping, UPLO='U'
             )
         self.d_g[layer], self.Q_g[layer] = torch.linalg.eigh(
-                self.m_gg[layer], UPLO='U'
+                self.m_gg[layer] + damping, UPLO='U'
             )
         self.d_a[layer] = self.d_a[layer].type(getattr(torch, self.precision))
         self.d_g[layer] = self.d_g[layer].type(getattr(torch, self.precision))
@@ -119,8 +119,9 @@ class NoisyKFAC(optim.Optimizer):
         # NOTE: we scale A_inv by lam/N here
         layer.dG, layer.dA =  self.d_g[layer], self.d_a[layer]
         layer.Q_G, layer.Q_A = self.Q_a[layer], self.Q_g[layer]
-        layer.A_inv = self.lam/ self.N * self.Q_a[layer] @ torch.diag(1.0/(self.d_a[layer] + damping)) @ self.Q_a[layer].T
-        layer.G_inv = self.Q_g[layer] @ torch.diag(1.0/(self.d_g[layer] + damping)) @ self.Q_g[layer].T
+        
+        layer.A_inv = (self.m_aa[layer] + damping * torch.eye(self.m_aa[layer].size(0))).inverse()
+        layer.G_inv = (self.m_gg[layer] + damping * torch.eye(self.m_gg[layer].size(0))).inverse()
 
 
 

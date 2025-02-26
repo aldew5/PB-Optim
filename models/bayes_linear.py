@@ -13,7 +13,9 @@ class BayesianLinear(nn.Module):
                  init_q: tuple[torch.Tensor, torch.Tensor],
                  approx="diagonal",
                  init_value=1e-2, 
-                 precision="float32"):
+                 precision="float32", 
+                 lam=1,
+                 N=60000):
         """
         Args:
             in_features (int): Input feature size
@@ -50,19 +52,20 @@ class BayesianLinear(nn.Module):
         # TODO: does not currently work
         if self.approx == 'noisy-kfac':
             # F \approx A \otimes G
-            self._A = init_value * torch.eye(self.in_features + 1, dtype=getattr(torch, precision))  #+ regularization * torch.eye(self.in_features)
-            self._G = init_value * torch.eye(self.out_features, dtype=getattr(torch, precision)) #+ regularization * torch.eye(self.out_features)\
+            self._A = init_value * torch.eye(self.in_features + 1, dtype=getattr(torch, precision)) 
+            self._G = init_value * torch.eye(self.out_features, dtype=getattr(torch, precision))
 
             self.A_inv = 1/init_value * torch.eye(self.in_features + 1, dtype=getattr(torch, precision))
             self.G_inv = 1/init_value * torch.eye(self.out_features, dtype=getattr(torch, precision))
             # initialize weights as MLP weights (we will compute gradients wrt weights)
-            self.weights =  nn.Parameter(init_q["weight"].to(torch.float64))
+            self.weights =  nn.Parameter(init_q["weight"].to(getattr(torch, precision)))
             self.q_mu = nn.Parameter(torch.cat((init_q["weight"].to(getattr(torch, precision)), 
                                                 init_q['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1), 
                                      requires_grad=False
                                      ) 
             self.dG, self.dA = None, None
             self.Q_G, self.Q_A = None, None
+            self.lam, self.N = lam, N
         
         elif self.approx == 'kfac':
             # we include the bias term in A
@@ -89,7 +92,8 @@ class BayesianLinear(nn.Module):
             kl = self.kl_divergence_kfac(self.p_mu, p_sigma, self.q_mu, flag)
 
             # sample the weights from MN(q_mu, lambda/N A^{-1}, G^{-1})
-            self.weights.data = current_sampling(self.q_mu, self.A_inv, self.G_inv).view(self.out_features, self.in_features + 1)
+            self.weights.data = current_sampling(self.q_mu, self.A_inv, self.G_inv,
+                                                  precision=self.precision, lam=self.lam, N=self.N).view(self.out_features, self.in_features + 1)
             outputs = F.linear(x, self.weights, torch.zeros(self.out_features).type(getattr(torch, self.precision)))
         
         # kfactored posterior approximation
@@ -151,7 +155,7 @@ class BayesianLinear(nn.Module):
         return kl
     
 
-    def kl_divergence_kfac(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-1):
+    def kl_divergence_kfac(self, p_mu, p_sigma, q_weight_mu, flag, epsilon=1e-8):
         #NOTE: make sure the eps aligns with clamping param in kfac/noisy-kfac
         """
         Compute the KL divergence between a diagonal Gaussian prior and a Kronecker-factored Gaussian posterior.
@@ -192,8 +196,8 @@ class BayesianLinear(nn.Module):
             log_det_G = torch.sum(torch.log(dG))
 
         else:
-            log_det_A = torch.sum(torch.log(self.dA))
-            log_det_G = torch.sum(torch.log(self.dG)) 
+            log_det_A = torch.sum(torch.log(self.dA + epsilon))
+            log_det_G = torch.sum(torch.log(self.dG + epsilon)) 
             A_inv, G_inv = self.A_inv, self.G_inv         
         
         
@@ -211,6 +215,7 @@ class BayesianLinear(nn.Module):
             + quad_term
         )
         
+        #print("KL:", kl)
         if kl < 0:
             kl = torch.tensor(0)
     
