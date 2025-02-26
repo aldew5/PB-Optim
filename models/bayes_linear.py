@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from utils.kfac_utils import *
 from utils.sampling import *
-import math
 
 
 class BayesianLinear(nn.Module):
@@ -12,12 +11,10 @@ class BayesianLinear(nn.Module):
                  out_features: int,
                  init_p: tuple[torch.Tensor, torch.Tensor],
                  init_q: tuple[torch.Tensor, torch.Tensor],
-                 id: int,
                  approx="diagonal",
                  init_value=1e-2, 
                  precision="float32"):
-        """Bayesian Linear Layer.
-
+        """
         Args:
             in_features (int): Input feature size
             out_features (int): Output feature size
@@ -41,14 +38,6 @@ class BayesianLinear(nn.Module):
         self.out_features = out_features
         self.precision = precision
 
-        # init prior
-        ##elf.p_weight_mu = nn.Parameter(init_p["weight"], requires_grad=False)
-        #s#elf.p_bias_mu = nn.Parameter(init_p["bias"], requires_grad=False)
-        
-
-        # for use in optimizer. will store gradients and A, G for momentum updates
-        self.id = id
-
         self.p_mu = nn.Parameter(
                 torch.cat((init_p["weight"].to(getattr(torch, precision)), init_p['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1), 
                 requires_grad=False
@@ -56,10 +45,7 @@ class BayesianLinear(nn.Module):
         self.q_bias_mu = None
 
         self.training = True
-        self.prev_kl = None
-        self.bias = None
-
-        self.A_inv, self.G_inv = None, None
+        self.bias = None # temporary hack because this is checked by the optimizer
 
         # TODO: does not currently work
         if self.approx == 'noisy-kfac':
@@ -75,14 +61,16 @@ class BayesianLinear(nn.Module):
                                                 init_q['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1), 
                                      requires_grad=False
                                      ) 
-
-            
+            self.dG, self.dA = None, None
+            self.Q_G, self.Q_A = None, None
+        
         elif self.approx == 'kfac':
             # we include the bias term in A
             self._A = init_value * torch.eye(self.in_features + 1)
             self._G = init_value * torch.eye(self.out_features)
             self.q_mu = nn.Parameter(torch.cat((init_q["weight"].to(getattr(torch, precision)), 
                                                 init_q['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1)) 
+            
 
         else:
             self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1)) 
@@ -180,82 +168,52 @@ class BayesianLinear(nn.Module):
         # Retrieve the KFAC blocks from this class
         A, G = self._A, self._G
         n, m = A.shape[0], G.shape[0]
-        
 
-        
-        #trace_A = torch.trace(A)
-        #trace_G = torch.trace(G)
-        #A = A / (trace_A + epsilon)
-        #G = G / (trace_G + epsilon)
-        
-        A = A + torch.eye(n, device=A.device) * epsilon
-        G = G + torch.eye(m, device=G.device) * epsilon
-        
-        # eigendecompositions
-        dA, Q_A = torch.linalg.eigh(A)  # or torch.symeig(A, eigenvectors=True)
-        dA = torch.clamp(dA, min=epsilon)  # Ensure eigenvalues are positive
-        # Log-determinant of A = sum(log(dA))
-        log_det_A = torch.sum(torch.log(dA))
-        # Inverse of A  = Q_A @ diag(1/dA) @ Q_A^T
-        inv_dA = 1.0 / dA
-        A_inv = self.A_inv if self.A_inv is not None else Q_A @ torch.diag(inv_dA) @ Q_A.T
-        #A_inv = Q_A @ torch.diag(inv_dA) @ Q_A.T
-        
-        dG, Q_G = torch.linalg.eigh(G)  # or torch.symeig(G, eigenvectors=True)
-        dG = torch.clamp(dG, min=epsilon)
+        # values have not yet been computed by the optimizer
+        if self.Q_A is None:
+            A = A + torch.eye(n, device=A.device) * epsilon
+            G = G + torch.eye(m, device=G.device) * epsilon
+            
+            # eigendecompositions
+            dA, Q_A = torch.linalg.eigh(A)
+            dA = torch.clamp(dA, min=epsilon) 
 
-        # Log-determinant of G = sum(log(dG))
-        log_det_G = torch.sum(torch.log(dG))
-        # Inverse of G  = Q_G @ diag(1/dG) @ Q_G^T
-        inv_dG = 1.0 / dG
-        G_inv = self.G_inv if self.G_inv is not None else Q_G @ torch.diag(inv_dG) @ Q_G.T
-        #G_inv = Q_G @ torch.diag(inv_dG) @ Q_G.T
+            inv_dA = 1.0 / dA
+            A_inv = Q_A @ torch.diag(inv_dA + epsilon) @ Q_A.T
+            
+            dG, Q_G = torch.linalg.eigh(G) 
+            dG = torch.clamp(dG, min=epsilon)
+            
+            # Inverse of G  = Q_G @ diag(1/dG) @ Q_G^T
+            inv_dG = 1.0 / dG
+            G_inv = Q_G @ torch.diag(inv_dG + epsilon) @ Q_G.T
+
+            log_det_A = torch.sum(torch.log(dA))
+            log_det_G = torch.sum(torch.log(dG))
+
+        else:
+            log_det_A = torch.sum(torch.log(self.dA))
+            log_det_G = torch.sum(torch.log(self.dG)) 
+            A_inv, G_inv = self.A_inv, self.G_inv         
         
-        # log(det(prior)) = n * log(p_sigma^2)
+        
         log_det_prior = n * m * torch.log(p_sigma**2)
-        #print(A_inv @self._A, G_inv @ self._G)
         
         # trace_term = trace(A) * trace(G) / p_sigma^2
-        # but trace(A) = sum(dA), trace(G) = sum(dG)
         trace_term = torch.trace(A_inv) * torch.trace(G_inv) * 1.0/(p_sigma**2)
         
-        # (q_weight_mu - p_weight_mu) is shaped (m*n,)
-        #delta_mu = q_weight_mu - p_mu
-        # Reshape to (m, n) to match the Kronecker structure
-        #delta_mu_reshaped = delta_mu.view(m, n)
-        
-        # Quadratic term = trace(G_inv @ (delta_mu @ A_inv @ delta_mu^T))
-        #inside = delta_mu_reshaped @ A_inv @ delta_mu_reshaped.T
-        #quadratic_term = torch.trace(G_inv @ inside)
         diff = q_weight_mu - p_mu
         quad_term = (1.0 / (p_sigma**2)) * torch.sum(diff**2)
 
-
-        #print("PSIGMA", p_sigma)
-        #print(log_det_A, log_det_G, log_det_prior, trace_term, quadratic_term)
-        # This matches the original formula:
-        # 0.5 * ((log_det_A + n*log_det_G - log_det_prior - m*n) 
-        #        + trace_term + quadratic_term)
         kl = 0.5 * (
             (m * log_det_A + n * log_det_G + log_det_prior - m * n)
             + trace_term
             + quad_term
         )
-        #print("HERE", n, m)
-        #print(log_det_A, log_det_G, log_det_prior, trace_term, quad_term)
         
-        #print("KL:", kl)
-        #print("Before rounding", kl)
-        # handling unstable KL 
         if kl < 0:
             kl = torch.tensor(0)
-            #if flag == 'eval': kl = self.prev_kl
-            #if self.training: self.training = False
-        #else:
-        #    self.prev_kl = kl
-        
-        #print(kl)
-        #print("KL", kl)
+    
         return kl
     
     def kl_normal_diag(self, p_mu, p_sigma, q_mu, q_sigma):
@@ -267,29 +225,3 @@ class BayesianLinear(nn.Module):
         return torch.sum(
             torch.log(p_sigma) - torch.log(q_sigma) + (q_sigma**2 + (p_mu - q_mu)**2) / (2 * p_sigma**2) - 0.5
         )
-
-   
-
-
-    """
-        def _noisy_inversion(self, p_log_sigma, batch_size, damping=1e-2):
-            #""
-            Computes the inverses of A and G.
-
-            params:
-                - p_log_sigma: log prior standard deviation
-            #""
-            nu = torch.exp(2 * p_log_sigma)
-            lam_scaled = torch.clamp(torch.tensor(math.sqrt(self.lam / (batch_size * nu))), min=1e-2)
-            damp2 = (damping + lam_scaled) * torch.eye(self._G.size(0))
-            damp1 = (damping + lam_scaled) * torch.eye(self._A.size(0))
-            A, G = self._A + damp1, self._G + damp2
-            
-
-            # TODO: ignoring pi_l
-            G_inv = torch.linalg.inv(G).double()
-            A_inv = torch.linalg.inv(A).double()
-            
-            return A_inv, G_inv
-        """
-

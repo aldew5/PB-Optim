@@ -48,7 +48,7 @@ def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime,
     Discretizes log sigma which we treat as a continuous parameter during optimization such that KL is maximized. Then 
     computes the final training error, sampling N times, and the resulting PAC-Bayes bound.
     """
-    print("called")
+    #print("called")
     model.eval()
     model.flag = 'eval'
     

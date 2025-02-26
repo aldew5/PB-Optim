@@ -20,15 +20,6 @@ from utils.args_parser import ArgsParser
 parser = ArgsParser()
 args = parser.parse_args()
 
-# init model
-nc = {
-    'cifar10': 10,
-    'cifar100': 100
-}
-
-
-num_classes = nc[args.dataset]
-
 # init dataloader
 trainloader, testloader = get_bMNIST(args.precision, batch_size=100)
 
@@ -114,15 +105,9 @@ def train(epoch, optimizer, net):
         optimizer.zero_grad()
         outputs = net(inputs)
         
-        
-        # fix output range [-10, 10]
-        #preds = torch.maximum(outputs[0], torch.tensor(10))
-        #preds = torch.clamp(preds, min=-10)
-        #preds = (torch.nn.functional.softmax(outputs.cpu().data, dim=1), 1).squeeze()
-        #print(outputs[0])
   
-        #loss = pac_bayes_loss2(outputs, targets)
-        loss = bce_loss(outputs[0], targets)
+        loss = pac_bayes_loss2(outputs, targets)
+        #loss = bce_loss(outputs[0], targets)
 
         optimizer.acc_stats = True
         
@@ -133,8 +118,8 @@ def train(epoch, optimizer, net):
             with torch.no_grad():
                 sampled_y = torch.multinomial(torch.nn.functional.softmax(outputs[0].data, dim=1),
                                               1).squeeze().float()
-            #loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1))
-            loss_sample = bce_loss(outputs[0], sampled_y.unsqueeze(1))
+            loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1))
+            #loss_sample = bce_loss(outputs[0], sampled_y.unsqueeze(1))
             loss_sample.backward(retain_graph=True)
             optimizer.acc_stats = False
             optimizer.zero_grad()  # clear the gradient for computing true-fisher.
@@ -217,6 +202,7 @@ def test(epoch, net):
     N_samples = 2
     plot = True
     save_plot = False    
+    # evaluate on the last epoch
     if epoch == args.epoch:
         evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, \
                      errors=errs, kls=kls, bces=bces, plot=plot, save_plot=save_plot)

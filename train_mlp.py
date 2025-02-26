@@ -7,15 +7,11 @@ from pathlib import Path
 
 from data.dataloader import get_bMNIST
 from utils.seed import set_seed
-from utils.train import train
+from utils.training_util import train
 from utils.evaluate import evaluate_MLP
+from utils.config import *
 
 from models.mlp import MLP
-
-# Setup
-set_seed(42)
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-SAVE_WEIGHTS = False
 
 # Model
 mlp_model = MLP().to(device)
@@ -38,7 +34,8 @@ trainloader, testloader = get_bMNIST(batch_size)
 optimizer = optim.SGD(mlp_model.parameters(), lr=learning_rate, momentum=momentum)
 scheduler = StepLR(optimizer, step_size=10, gamma=1) 
 bce_loss = nn.BCEWithLogitsLoss()
-def bce_loss2(outputs, labels): # Modified loss function that plays nice with our MLP
+
+def bce_loss2(outputs, labels):
     return bce_loss(outputs[0], labels)
 
 mlp_losses, mlp_accs = train(mlp_model, epochs, optimizer, scheduler, trainloader, bce_loss2, device)

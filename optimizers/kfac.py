@@ -5,6 +5,7 @@ import torch.optim as optim
 from utils.kfac_utils import (ComputeCovA, ComputeCovG)
 from utils.kfac_utils import update_running_stat
 
+# based on https://github.com/alecwangcq/KFAC-Pytorch
 
 class KFACOptimizer(optim.Optimizer):
     def __init__(self,

@@ -1,8 +1,10 @@
 import torch
 import torch.optim as optim
-from models.bayes_linear import BayesianLinear
 from utils.kfac_utils import *
 import math
+
+
+# TODO: I don't calculate damping as in their paper
 
 
 class NoisyKFAC(optim.Optimizer):
@@ -72,8 +74,6 @@ class NoisyKFAC(optim.Optimizer):
         """
         if torch.is_grad_enabled() and self.steps % self.T_stats == 0:
             aa = self.CovAHandler(input[0].data, module)
-            # give the model access to kfactors
-            #module._A = self.lam/self.N * aa
             # Initialize buffers
             if self.steps == 0:
                 self.m_aa[module] = torch.diag(aa.new(aa.size(0)).fill_(1))
@@ -89,8 +89,6 @@ class NoisyKFAC(optim.Optimizer):
         # Accumulate statistics for Fisher matrices
         if self.acc_stats and self.steps % self.T_stats == 0:
             gg = self.CovGHandler(grad_output[0].data, module, self.batch_averaged)
-            # give the model access to the kfactors
-            #module._G = gg
             # Initialize buffers
             if self.steps == 0:
                 self.m_gg[module] = torch.diag(gg.new(gg.size(0)).fill_(1))
@@ -117,9 +115,10 @@ class NoisyKFAC(optim.Optimizer):
         self.d_a[layer].mul_((self.d_a[layer] > eps).float())
         self.d_g[layer].mul_((self.d_g[layer] > eps).float())
 
-        # give model access to the inverse kroneckers for sampling
+        # give model access to eigenvectors, etc. for sampling from kfactored distr
         # NOTE: we scale A_inv by lam/N here
-        # TODO: damping here?
+        layer.dG, layer.dA =  self.d_g[layer], self.d_a[layer]
+        layer.Q_G, layer.Q_A = self.Q_a[layer], self.Q_g[layer]
         layer.A_inv = self.lam/ self.N * self.Q_a[layer] @ torch.diag(1.0/(self.d_a[layer] + damping)) @ self.Q_a[layer].T
         layer.G_inv = self.Q_g[layer] @ torch.diag(1.0/(self.d_g[layer] + damping)) @ self.Q_g[layer].T
 
