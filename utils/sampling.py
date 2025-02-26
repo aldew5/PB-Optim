@@ -87,6 +87,65 @@ def sample_from_kron_dist(q_mu, A, G, epsilon=1e-2):
     return samples
 
 
+def current_sampling(q_mu, A_inv, G_inv, epsilon=1e-2, precision="float32"):
+    """
+    Sample from a multivariate normal distribution
+        N(q_mu, G^{-1} ⊗ A^{-1})
+    which is equivalent to the matrix normal
+        MN(q_mu, A^{-1}, G^{-1}),
+    where we interpret the final (m*n)-dim vector as an (m x n) matrix.
+    
+    Here A is (n x n) and G is (m x m). The interpretation is that the
+    column covariance is A^{-1} and the row covariance is G^{-1}, so that
+    vec(X) ~ N(vec(q_mu), G^{-1} ⊗ A^{-1}).
+
+    Args:
+        q_mu (torch.Tensor): Mean vector of size (m * n,).
+        A (torch.Tensor): A matrix of size (n x n). Its inverse gives the column covariance.
+        G (torch.Tensor): A matrix of size (m x m). Its inverse gives the row covariance.
+        epsilon (float): Regularization constant to ensure positive-definiteness.
+
+    Returns:
+        torch.Tensor: Sample vector of size (m * n,).
+    """
+    # Ensure q_mu is a flat vector.
+    q_mu = q_mu.view(-1)
+    
+    m = G_inv.shape[0]  # number of rows
+    n = A_inv.shape[0]  # number of columns
+
+    # Compute eigen-decomposition of A_inv and G_inv.
+    d_A, Q_A = torch.linalg.eigh(A_inv, UPLO='U')
+    d_G, Q_G = torch.linalg.eigh(G_inv, UPLO='U')
+    
+    # Clamp eigenvalues for numerical stability.
+    d_A = torch.clamp(d_A, min=epsilon)
+    d_G = torch.clamp(d_G, min=epsilon)
+    
+    # Compute the square-root factors:
+    # sqrt_A_inv such that sqrt_A_inv @ sqrt_A_inv^T = A_inv.
+    sqrt_A_inv = Q_A @ torch.diag(torch.sqrt(d_A)) @ Q_A.t()
+    sqrt_G_inv = Q_G @ torch.diag(torch.sqrt(d_G)) @ Q_G.t()
+    
+    # Draw a standard normal sample Z of shape (m, n).
+    Z = torch.randn(m, n, device=A_inv.device, dtype=getattr(torch, precision))
+    sqrt_A_inv, sqrt_G_inv = sqrt_A_inv.type(getattr(torch, precision)), sqrt_G_inv.type(getattr(torch, precision))
+    
+    
+    # Sample from the matrix normal:
+    #   X = sqrt_G_inv @ Z @ sqrt_A_inv^T
+    X = sqrt_G_inv @ Z @ sqrt_A_inv.t()
+    
+    # Flatten X and add the mean.
+    sample_vec = X.flatten() + q_mu
+    
+    if sample_vec.numel() != q_mu.numel():
+        raise ValueError(
+            f"Dimension mismatch: sample has {sample_vec.numel()} elements, "
+            f"but q_mu has {q_mu.numel()} elements."
+        )
+    
+    return sample_vec
 
 
 def sample_from_kron_dist_fast(q_mu, A, G, epsilon=1e-2):
@@ -192,7 +251,7 @@ def sample_activations_kron_fast(
 
     # -- 5. Apply the Kronecker-factor “square root” transform for W:
     #        W_samp = QG diag(dG_inv_sqrt) * Z * diag(dA_inv_sqrt) QA^T
-    #   This would be a sample from N(0, G^-1 ⊗ A^-1) if we omit the mean.
+    #   This would be a sample from N(0, A^-1 ⊗ G^-1) if we omit the mean.
     Z_row_scaled = torch.diag(dG_inv_sqrt) @ Z         
     Z_left       = QG @ Z_row_scaled                     
     Z_col_scaled = Z_left @ torch.diag(dA_inv_sqrt)      
