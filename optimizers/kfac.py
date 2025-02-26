@@ -5,6 +5,7 @@ import torch.optim as optim
 from utils.kfac_utils import (ComputeCovA, ComputeCovG)
 from utils.kfac_utils import update_running_stat
 
+# based on https://github.com/alecwangcq/KFAC-Pytorch
 
 class KFACOptimizer(optim.Optimizer):
     def __init__(self,
@@ -12,11 +13,11 @@ class KFACOptimizer(optim.Optimizer):
                  lr=0.01,
                  momentum=0.9,
                  stat_decay=0.95,
-                 damping=1e-3,
+                 damping=1e-1,
                  kl_clip=0.001,
                  weight_decay=0,
-                 TCov=10,
-                 TInv=100,
+                 T_stats=10,
+                 T_inv=100,
                  batch_averaged=True):
         if lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -48,14 +49,14 @@ class KFACOptimizer(optim.Optimizer):
         self.stat_decay = stat_decay
 
         self.kl_clip = kl_clip
-        self.TCov = TCov
-        self.TInv = TInv
+        self.T_stats = T_stats
+        self.T_inv = T_inv
 
     def _save_input(self, module, input):
         #if not module.training: return None
-        if torch.is_grad_enabled() and self.steps % self.TCov == 0:
+        if torch.is_grad_enabled() and self.steps % self.T_stats == 0:
             aa = self.CovAHandler(input[0].data, module)
-            module._A = aa
+            #module._A = aa
             # Initialize buffers
             if self.steps == 0:
                 self.m_aa[module] = torch.diag(aa.new(aa.size(0)).fill_(1))
@@ -64,9 +65,9 @@ class KFACOptimizer(optim.Optimizer):
     def _save_grad_output(self, module, grad_input, grad_output):
         #if not module.training: return None
         # Accumulate statistics for Fisher matrices
-        if self.acc_stats and self.steps % self.TCov == 0:
+        if self.acc_stats and self.steps % self.T_stats == 0:
             gg = self.CovGHandler(grad_output[0].data, module, self.batch_averaged)
-            module._G = gg
+            #module._G = gg
             # Initialize buffers
             if self.steps == 0:
                 self.m_gg[module] = torch.diag(gg.new(gg.size(0)).fill_(1))
@@ -107,10 +108,10 @@ class KFACOptimizer(optim.Optimizer):
 
         # giving model access to inverses and log determinants 
         # not using this in current implementation
-        m.A_inv = self.Q_a[m] @ torch.diag(d_a_inv) @ self.Q_a[m].T  # Explicit inverse of m_aa
-        m.G_inv = self.Q_g[m] @ torch.diag(d_g_inv) @ self.Q_g[m].T
-        m.log_det_A = torch.sum(torch.log(self.d_a[m]))
-        m.log_det_G = torch.sum(torch.log(self.d_g[m]))
+        #m.A_inv = self.Q_a[m] @ torch.diag(d_a_inv) @ self.Q_a[m].T  # Explicit inverse of m_aa
+        #m.G_inv = self.Q_g[m] @ torch.diag(d_g_inv) @ self.Q_g[m].T
+        #m.log_det_A = torch.sum(torch.log(self.d_a[m]))
+        #m.log_det_G = torch.sum(torch.log(self.d_g[m]))
 
 
     @staticmethod
@@ -185,7 +186,7 @@ class KFACOptimizer(optim.Optimizer):
                 if p.grad is None:
                     continue
                 d_p = p.grad.data
-                #print(param2name[p], p.grad.data)
+                print(param2name[p], p.grad.data)
                 param_name = param2name.get(p, "<unknown>")
                 # update to prior std
                 if param_name == "p_log_sigma":
@@ -193,7 +194,7 @@ class KFACOptimizer(optim.Optimizer):
                     p.data.add_(d_p, alpha=-group['lr'])
                     continue
 
-                if weight_decay != 0 and self.steps >= 20 * self.TCov:
+                if weight_decay != 0 and self.steps >= 20 * self.T_stats:
                     d_p.add_(weight_decay, p.data)
                 if momentum != 0:
                     param_state = self.state[p]
@@ -219,7 +220,7 @@ class KFACOptimizer(optim.Optimizer):
             #print(m)
             #if not m.training: continue
             classname = m.__class__.__name__
-            if self.steps % self.TInv == 0:
+            if self.steps % self.T_inv == 0:
                 self._update_inv(m)
             p_grad_mat = self._get_matrix_form_grad(m, classname)
             v = self._get_natural_grad(m, p_grad_mat, damping)

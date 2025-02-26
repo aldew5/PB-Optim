@@ -1,6 +1,7 @@
 import argparse
 import os
 from optimizers.kfac import KFACOptimizer
+from optimizers.noisy_kfac import NoisyKFAC
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -10,68 +11,22 @@ from models.bnn import BayesianNN
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 from data.dataloader import get_bMNIST
-from utils.pac_bayes_loss import pac_bayes_loss
+from utils.pac_bayes_loss import pac_bayes_loss2
 from utils.evaluate import evaluate_BNN
 from utils.config import *
 import matplotlib.pyplot as plt
+from utils.args_parser import ArgsParser
 
-
-# fetch args
-parser = argparse.ArgumentParser()
-
-
-parser.add_argument('--network', default='vgg16_bn', type=str)
-parser.add_argument('--depth', default=19, type=int)
-parser.add_argument('--dataset', default='cifar10', type=str)
-
-# densenet
-parser.add_argument('--growthRate', default=12, type=int)
-parser.add_argument('--compressionRate', default=2, type=int)
-
-# wrn, densenet
-parser.add_argument('--widen_factor', default=1, type=int)
-parser.add_argument('--dropRate', default=0.0, type=float)
-
-
-parser.add_argument('--device', default='cuda', type=str)
-parser.add_argument('--resume', '-r', action='store_true')
-parser.add_argument('--load_path', default='', type=str)
-parser.add_argument('--log_dir', default='runs/pretrain', type=str)
-
-
-parser.add_argument('--optimizer', default='kfac', type=str)
-parser.add_argument('--batch_size', default=64, type=float)
-parser.add_argument('--epoch', default=1, type=int)
-parser.add_argument('--milestone', default=None, type=str)
-parser.add_argument('--learning_rate', default=0.001, type=float)
-parser.add_argument('--momentum', default=0.9, type=float)
-parser.add_argument('--stat_decay', default=0.95, type=float)
-parser.add_argument('--damping', default=1e-3, type=float)
-parser.add_argument('--kl_clip', default=1e-2, type=float)
-parser.add_argument('--weight_decay', default=3e-3, type=float)
-parser.add_argument('--TCov', default=10, type=int)
-parser.add_argument('--TScal', default=10, type=int)
-parser.add_argument('--TInv', default=100, type=int)
-
-parser.add_argument('--prefix', default=None, type=str)
+parser = ArgsParser()
 args = parser.parse_args()
 
-# init model
-nc = {
-    'cifar10': 10,
-    'cifar100': 100
-}
-
-
-num_classes = nc[args.dataset]
-
 # init dataloader
-trainloader, testloader = get_bMNIST(batch_size=100)
+trainloader, testloader = get_bMNIST(args.precision, batch_size=100)
 
 w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
 w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 
-net = BayesianNN(w0, w1, p_log_sigma=-1.16,  approx='kfac').to(device)
+net = BayesianNN(w0, w1, p_log_sigma=-1.16,  approx='noisy-kfac', precision=args.precision).to(device)
 # init optimizer and lr scheduler
 optim_name = args.optimizer.lower()
 tag = optim_name
@@ -82,15 +37,17 @@ if optim_name == 'sgd':
                           weight_decay=args.weight_decay)
 elif optim_name == 'kfac':
     # optimal params for diagonal
-    optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
+    #optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
+    optimizer = NoisyKFAC(net, T_stats=10, T_inv=100,  lr=0.019908763029878117, damping=0.09398758455968932, 
+                          weight_decay=0, N=len(trainloader), precision=args.precision)
                               #lr=args.learning_rate,
                               ##momentum=args.momentum,
                               #stat_decay=args.stat_decay,
                               #damping=args.damping,
                               #kl_clip=args.kl_clip,
                               #weight_decay=args.weight_decay,
-                              #TCov=args.TCov,
-                              #TInv=args.TInv)
+                              #T_stats=args.T_stats,
+                              #T_inv=args.T_inv)
 else:
     raise NotImplementedError
 
@@ -125,8 +82,7 @@ if not os.path.isdir(log_dir):
 writer = SummaryWriter(log_dir)
 kls, bces, errs, bounds, losses = [], [], [], [], []
 
-def pac_bayes_loss2(outputs, labels):
-    return pac_bayes_loss(outputs, labels, m, b, c, pi, delta)
+
 
 
 def train(epoch, optimizer, net):
@@ -149,25 +105,21 @@ def train(epoch, optimizer, net):
         optimizer.zero_grad()
         outputs = net(inputs)
         
-        
-        # fix output range [-10, 10]
-        #preds = torch.maximum(outputs[0], torch.tensor(10))
-        #preds = torch.clamp(preds, min=-10)
-        #preds = (torch.nn.functional.softmax(outputs.cpu().data, dim=1), 1).squeeze()
-        #print(outputs[0])
   
         loss = pac_bayes_loss2(outputs, targets)
+        #loss = bce_loss(outputs[0], targets)
 
         optimizer.acc_stats = True
         
         # for updating the kfactors
-        if optim_name in ['kfac', 'ekfac'] and optimizer.steps % optimizer.TCov == 0:
+        if optim_name in ['kfac', 'ekfac'] and optimizer.steps % optimizer.T_stats == 0:
             # compute true fisher
             optimizer.acc_stats = True
             with torch.no_grad():
                 sampled_y = torch.multinomial(torch.nn.functional.softmax(outputs[0].data, dim=1),
                                               1).squeeze().float()
             loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1))
+            #loss_sample = bce_loss(outputs[0], sampled_y.unsqueeze(1))
             loss_sample.backward(retain_graph=True)
             optimizer.acc_stats = False
             optimizer.zero_grad()  # clear the gradient for computing true-fisher.
@@ -208,6 +160,7 @@ def test(epoch, net):
             inputs, targets = inputs.to(device), targets.to(device).float().view(-1, 1)
             outputs = net(inputs)
             loss = pac_bayes_loss2(outputs, targets)
+            #loss = bce_loss(outputs[0], targets)
 
             test_loss += loss.item()
             preds = torch.round(torch.sigmoid(outputs[0]))
@@ -249,6 +202,7 @@ def test(epoch, net):
     N_samples = 2
     plot = True
     save_plot = False    
+    # evaluate on the last epoch
     if epoch == args.epoch:
         evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, \
                      errors=errs, kls=kls, bces=bces, plot=plot, save_plot=save_plot)
