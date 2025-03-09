@@ -69,7 +69,7 @@ class NoisyKFAC(optim.Optimizer):
     def _save_input(self, module, input):
         """
         Use inputs to update A = aa^T with exp moving average.
-        :param module: BayesianLinear layer
+        :param module: BayaesianLinear layer
         :input: pre-layer activations
         """
         if torch.is_grad_enabled() and self.steps % self.T_stats == 0:

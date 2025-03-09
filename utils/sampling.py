@@ -1,44 +1,6 @@
 import torch
 
 
-def sample_from_matrix_normal(q_mu, A, G, num_samples=1):
-    """
-    Sample from N(q_mu, A^{-1} ⊗ G^{-1}) using eigendecomposition to compute inverses.
-
-    Parameters:
-    - q_mu: torch.Tensor, shape (n, p), the mean matrix.
-    - A: torch.Tensor, shape (n, n), the row covariance matrix (A, not its inverse).
-    - G: torch.Tensor, shape (p, p), the column covariance matrix (G, not its inverse).
-    - num_samples: int, the number of samples to generate (default: 1).
-
-    Returns:
-    - samples: torch.Tensor, shape (num_samples, n, p), the sampled matrices.
-    """
-    n, p = q_mu.shape
-
-    # Eigendecomposition of A and G
-    eigvals_A, eigvecs_A = torch.linalg.eigh(A)
-    eigvals_G, eigvecs_G = torch.linalg.eigh(G)
-
-    # Compute A^{-1/2} and G^{-1/2}
-    A_inv_sqrt = eigvecs_A @ torch.diag(1.0 / torch.sqrt(eigvals_A)) @ eigvecs_A.T
-    G_inv_sqrt = eigvecs_G @ torch.diag(1.0 / torch.sqrt(eigvals_G)) @ eigvecs_G.T
-
-    # Generate standard normal samples
-    z = torch.randn(num_samples, n, p)  # Shape: (num_samples, n, p)
-
-    # Apply row covariance structure using A_inv_sqrt
-    z = torch.einsum('ij,bjk->bik', A_inv_sqrt, z)  # Shape: (num_samples, n, p)
-
-    # Apply column covariance structure using G_inv_sqrt
-    samples = torch.einsum('bij,jk->bik', z, G_inv_sqrt.T)  # Shape: (num_samples, n, p)
-
-    # Add the mean q_mu
-    samples += q_mu
-
-    return samples
-
-
 def sample_from_kron_dist(q_mu, A, G, epsilon=1e-2):
     """
     Sample from a multivariate normal distribution with covariance A^{-1} ⊗ G^{-1}.
@@ -87,7 +49,7 @@ def sample_from_kron_dist(q_mu, A, G, epsilon=1e-2):
     return samples
 
 
-def current_sampling(q_mu, A_inv, G_inv, lam, N, epsilon=1e-2, precision="float32"):
+def sample_matrix_normal(q_mu, A_inv, G_inv, lam, N, epsilon=1e-2, precision="float32"):
     """
     Sample from a multivariate normal distribution
         N(q_mu, G^{-1} ⊗ A^{-1})
@@ -108,7 +70,7 @@ def current_sampling(q_mu, A_inv, G_inv, lam, N, epsilon=1e-2, precision="float3
     Returns:
         torch.Tensor: Sample vector of size (m * n,).
     """
-    # Ensure q_mu is a flat vector.
+    # vec(q_mu)
     q_mu = q_mu.view(-1)
     m = G_inv.shape[0] 
     n = A_inv.shape[0] 

@@ -41,9 +41,9 @@ class BayesianNN(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         
-        self.bl1 = BayesianLinear(in_features, hidden_features, init_p_weights[0], init_q_weights[0], approx=approx, precision=precision, lam=lam, N=N)
-        self.bl2 = BayesianLinear(hidden_features, hidden_features, init_p_weights[1], init_q_weights[1], approx=approx, precision=precision, lam=lam, N=N)
-        self.bl3 = BayesianLinear(hidden_features, 1, init_p_weights[2], init_q_weights[2], approx=approx, precision=precision, lam=lam, N=N)
+        self.bl1 = BayesianLinear(0, in_features, hidden_features, init_p_weights[0], init_q_weights[0], approx=approx, precision=precision, lam=lam, N=N)
+        self.bl2 = BayesianLinear(1, hidden_features, hidden_features, init_p_weights[1], init_q_weights[1], approx=approx, precision=precision, lam=lam, N=N)
+        self.bl3 = BayesianLinear(2, hidden_features, 1, init_p_weights[2], init_q_weights[2], approx=approx, precision=precision, lam=lam, N=N)
 
         self.layers = [self.bl1, self.bl2, self.bl3]
         self.flag = "train" # updated for eval

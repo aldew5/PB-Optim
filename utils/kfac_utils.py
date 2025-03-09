@@ -2,6 +2,34 @@ import torch
 import torch.nn.functional as F
 
 
+def init_kfactored_prior(n, m, alpha_A=1e-2, rho_A=1e-3, alpha_G=1e-2, rho_G=1e-3, device="cpu", precision="float64"):
+    """
+    Create Kronecker-factored prior factors A_prior and G_prior.
+
+    Args:
+        n (int): Dimension of the column factor (A_prior is n x n).
+        m (int): Dimension of the row factor (G_prior is m x m).
+        alpha_A (float): Scaling for A_prior.
+        rho_A (float): Off-diagonal strength for A_prior.
+        alpha_G (float): Scaling for G_prior.
+        rho_G (float): Off-diagonal strength for G_prior.
+        device (str): Device to create tensors on ('cpu' or 'cuda').
+
+    Returns:
+        A_prior (torch.Tensor): Prior for the column covariance (n x n).
+        G_prior (torch.Tensor): Prior for the row covariance (m x m).
+    """
+    # Similarly, construct G_prior = alpha_G * (I + rho_G * ones)
+    ones_m = torch.ones((m, m), device=device, dtype=getattr(torch, precision))
+    ones_n = torch.ones((n, n), device=device, dtype=getattr(torch, precision))
+
+    A_prior = alpha_A * torch.eye(n, device=device) + rho_A * ones_n
+    G_prior = alpha_G * torch.eye(m, device=device) + rho_G * ones_m
+    
+    return A_prior, G_prior
+
+
+
 def try_contiguous(x):
     if not x.is_contiguous():
         x = x.contiguous()

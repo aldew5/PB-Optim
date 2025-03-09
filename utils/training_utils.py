@@ -157,7 +157,6 @@ def test_kfac(epoch, net, testloader, lr_scheduler, writer, errs, kls, bces, los
                     % (tag, lr_scheduler.get_lr()[0], test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             prog_bar.set_description(desc, refresh=True)
 
-    acc = 100.*correct/total
 
     errs.append(1 - correct/total)
     kls.append(outputs[1].clone().detach())

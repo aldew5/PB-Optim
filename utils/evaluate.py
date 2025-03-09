@@ -6,7 +6,7 @@ from models.mlp import MLP
 from models.bnn import BayesianNN
 from utils.newtons import pac_bound
 
-def evaluate_MLP(model: MLP, testloader, device, losses: list[float] = None, plot=False, save_plot=False):
+def evaluate_MLP(model: MLP, testloader, device, losses: list[float] = None, accs=None, plot=False, save_plot=False):
     model.eval()
     test_acc = 0
     with torch.no_grad():

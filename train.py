@@ -11,7 +11,7 @@ from tensorboardX import SummaryWriter
 from data.dataloader import get_bMNIST
 from utils.pac_bayes_loss import pac_bayes_loss2
 from utils.evaluate import evaluate_BNN
-from utils.training_util import *
+from utils.training_utils import *
 from utils.config import *
 import matplotlib.pyplot as plt
 from utils.args_parser import ArgsParser
@@ -104,7 +104,10 @@ else:
     N_samples = 2
     #plot = False
     save_plot = False    
-    evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, \
-                     errors=errs, kls=kls, bces=bces, plot=False, save_plot=save_plot)
+    for i, layer in enumerate(net.layers):
+        torch.save(layer._A, f'priors/A{i}.pt')
+        torch.save(layer._G, f'priors/G{i}.pt')
+    #evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, \
+     #                errors=errs, kls=kls, bces=bces, plot=False, save_plot=save_plot)
     
     plot(bces, kls, errs, bounds)
