@@ -60,7 +60,7 @@ class KFACOptimizer(optim.Optimizer):
             # Initialize buffers
             if self.steps == 0:
                 self.m_aa[module] = torch.diag(aa.new(aa.size(0)).fill_(1))
-            update_running_stat(aa, self.m_aa[module], self.stat_decay)
+            update_running_stat(aa, self.m_aa[module], self.stat_decay, module, "A")
 
     def _save_grad_output(self, module, grad_input, grad_output):
         #if not module.training: return None
@@ -71,7 +71,7 @@ class KFACOptimizer(optim.Optimizer):
             # Initialize buffers
             if self.steps == 0:
                 self.m_gg[module] = torch.diag(gg.new(gg.size(0)).fill_(1))
-            update_running_stat(gg, self.m_gg[module], self.stat_decay)
+            update_running_stat(gg, self.m_gg[module], self.stat_decay, module, "G")
 
     def _prepare_model(self):
         count = 0
@@ -186,7 +186,7 @@ class KFACOptimizer(optim.Optimizer):
                 if p.grad is None:
                     continue
                 d_p = p.grad.data
-                print(param2name[p], p.grad.data)
+                #print(param2name[p], p.grad.data)
                 param_name = param2name.get(p, "<unknown>")
                 # update to prior std
                 if param_name == "p_log_sigma":

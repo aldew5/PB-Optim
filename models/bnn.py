@@ -12,9 +12,10 @@ class BayesianNN(nn.Module):
                  in_features: int = 784,
                  out_features: int = 1,
                  hidden_features: int = 300,
-                 p_log_sigma: float = -1.16, #-6,
+                 p_log_sigma: float =-1.16,
                  approx="diagonal",
                  precision="float32", 
+                 optimizer="sgd",
                  lam=1,
                  N=60000):
         """Bayesian Neural Network (BNN) model w/ 3 layers.
@@ -36,14 +37,17 @@ class BayesianNN(nn.Module):
         self.approx = approx
         # TODO: fixed log sigma for now because it gets pushed too small if we let it vary
         # find closed form optimal?
-        self.p_log_sigma = nn.Parameter(torch.tensor(p_log_sigma, dtype=getattr(torch, precision)), requires_grad =False)
+        self.p_log_sigma = nn.Parameter(torch.tensor(p_log_sigma, dtype=getattr(torch, precision)), requires_grad=False)
 
         self.in_features = in_features
         self.out_features = out_features
         
-        self.bl1 = BayesianLinear(0, in_features, hidden_features, init_p_weights[0], init_q_weights[0], approx=approx, precision=precision, lam=lam, N=N)
-        self.bl2 = BayesianLinear(1, hidden_features, hidden_features, init_p_weights[1], init_q_weights[1], approx=approx, precision=precision, lam=lam, N=N)
-        self.bl3 = BayesianLinear(2, hidden_features, 1, init_p_weights[2], init_q_weights[2], approx=approx, precision=precision, lam=lam, N=N)
+        self.bl1 = BayesianLinear(0, in_features, hidden_features, init_p_weights[0], init_q_weights[0], 
+                                  approx=approx, precision=precision, lam=lam, N=N, optimizer=optimizer)
+        self.bl2 = BayesianLinear(1, hidden_features, hidden_features, init_p_weights[1], init_q_weights[1], 
+                                  approx=approx, precision=precision, lam=lam, N=N, optimizer=optimizer)
+        self.bl3 = BayesianLinear(2, hidden_features, 1, init_p_weights[2], init_q_weights[2], 
+                                  approx=approx, precision=precision, lam=lam, N=N, optimizer=optimizer)
 
         self.layers = [self.bl1, self.bl2, self.bl3]
         self.flag = "train" # updated for eval
@@ -56,19 +60,19 @@ class BayesianNN(nn.Module):
             
         x = x.view(-1, self.in_features)
 
-        x, kl1 = self.bl1(x, p_log_sigma, self.flag)
+        x, kl1 = self.bl1(x, p_log_sigma)
         x = F.relu(x)
 
-        x, kl2 = self.bl2(x, p_log_sigma, self.flag)
+        x, kl2 = self.bl2(x, p_log_sigma)
         x = F.relu(x)
 
-        x, kl3 = self.bl3(x, p_log_sigma, self.flag)
+        x, kl3 = self.bl3(x, p_log_sigma)
         
         #print(x, kl1, kl2, kl3)
         return x, kl1 + kl2 + kl3, p_log_sigma
     
     def kl_divergence(self, p_log_sigma=None):
-        if p_log_sigma is None and not self.kfac:
+        if p_log_sigma is None:
             p_log_sigma = self.p_log_sigma
 
         

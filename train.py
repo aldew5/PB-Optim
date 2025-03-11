@@ -25,19 +25,24 @@ trainloader, testloader = get_bMNIST(args.precision, batch_size=100)
 w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
 w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 
-#TODO: empirical good choice for p log sigma
-net = BayesianNN(w0, w1, p_log_sigma=-1.16,  approx=args.approx, precision=args.precision).to(device)
+
 
 # init optimizer and lr scheduler
 optim_name = args.optimizer.lower()
 tag = optim_name
+
+#TODO: empirical good choice for p log sigma
+net = BayesianNN(w0, w1, p_log_sigma=-1.16,  approx=args.approx, optimizer=optim_name, precision=args.precision).to(device)
+
 if optim_name == 'sgd':
     optimizer = optim.SGD(net.parameters(),
                           lr=args.learning_rate,
                           momentum=args.momentum,
                           weight_decay=args.weight_decay)
+elif optim_name == "adam":
+    optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
 elif optim_name == 'noisy-kfac':
-    optimizer = NoisyKFAC(net, T_stats=1, T_inv=10,  lr=1e-3, damping=0.0001, 
+    optimizer = NoisyKFAC(net, T_stats=1, T_inv=10,  lr=1e-3, damping=0.001, 
                           weight_decay=0, N=len(trainloader), precision=args.precision)    
 elif optim_name == "kfac":
     optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
@@ -105,9 +110,9 @@ else:
     #plot = False
     save_plot = False    
     for i, layer in enumerate(net.layers):
-        torch.save(layer._A, f'priors/A{i}.pt')
-        torch.save(layer._G, f'priors/G{i}.pt')
+        torch.save(layer.A_inv, f'priors/A_inv{i}.pt')
+        torch.save(layer.G_inv, f'priors/G_inv{i}.pt')
     #evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, \
-     #                errors=errs, kls=kls, bces=bces, plot=False, save_plot=save_plot)
+    #                 errors=errs, kls=kls, bces=bces, plot=False, save_plot=save_plot)
     
     plot(bces, kls, errs, bounds)

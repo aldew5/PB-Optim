@@ -117,11 +117,16 @@ class NoisyKFAC(optim.Optimizer):
 
         # give model access to eigenvectors, etc. for sampling from kfactored distr
         # NOTE: we scale A_inv by lam/N here
-        layer.dG, layer.dA =  self.d_g[layer], self.d_a[layer]
-        layer.Q_G, layer.Q_A = self.Q_a[layer], self.Q_g[layer]
-        
-        layer.A_inv = (self.m_aa[layer] + damping * torch.eye(self.m_aa[layer].size(0))).inverse()
-        layer.G_inv = (self.m_gg[layer] + damping * torch.eye(self.m_gg[layer].size(0))).inverse()
+        if self.model.approx != "diagonal":
+            layer.dG, layer.dA =  self.d_g[layer], self.d_a[layer]
+            layer.Q_G, layer.Q_A = self.Q_a[layer], self.Q_g[layer]
+            
+            layer.A_inv = (self.m_aa[layer] + damping * torch.eye(self.m_aa[layer].size(0))).inverse()
+            layer.G_inv = (self.m_gg[layer] + damping * torch.eye(self.m_gg[layer].size(0))).inverse()
+
+        else:
+            layer.A_inv = (self.m_aa[layer] + damping * torch.eye(self.m_aa[layer].size(0))).inverse()
+            layer.G_inv = (self.m_gg[layer] + damping * torch.eye(self.m_gg[layer].size(0))).inverse()
 
 
 
@@ -144,6 +149,7 @@ class NoisyKFAC(optim.Optimizer):
         # update grad with nu
         for m in self.modules:
             v = updates[m]
+            # replace m.weights grad with the natural gradient
             m.weights.grad.data.copy_(v[0])
             m.weights.grad.data.mul_(nu)
             #if m.q_bias_mu is not None:
@@ -193,22 +199,37 @@ class NoisyKFAC(optim.Optimizer):
         param2name = {}
         for name, param in self.model.named_parameters():
             param2name[param] = name
+            #print("NAME", name)
 
         for group in self.param_groups:
             weight_decay = group['weight_decay']
             momentum = group['momentum']
 
             for p in group['params']:
-                if p.grad is None:
+                #print(param2name[p])
+                grad = p.grad
+                # we want grad wrt weights to update p_mu
+                if "q_mu" in param2name[p]:
+                    for q in group['params']:
+                        #print(param2name[q])
+                        if "weights" in param2name[q] and param2name[q][:3] == param2name[p][:3]:
+                            grad = q.grad
+                            break
+
+                #print(param2name[p], grad)
+                if grad is None:
                     continue
-                d_p = p.grad.data
+                d_p = grad
                 param_name = param2name.get(p, "<unknown>")
-                
+                #print("NAME", param2name[param])
                 
                 # update to prior std (ignore momentum)
-                if param_name == "p_log_sigma":
-                    #p.data.add_(-group['lr'], d_p) NOTE: deprecated
-                    p.data.add_(d_p, alpha=-group['lr'])
+                #print("PARAM NAME", param_name)
+                #if "p_log_sigma" in param_name or "q_log_sigma" in param_name:
+                ##    #p.data.add_(-group['lr'], d_p) NOTE: deprecated
+                #    p.data.add_(d_p, alpha=-group['lr'])
+                #    continue
+                if "weights" in param_name:
                     continue
             
                 # compute momentum grad for update
@@ -226,6 +247,7 @@ class NoisyKFAC(optim.Optimizer):
                     d_p = buf
 
                 #update param
+                #print("name", param_name)
                 p.data.add_(d_p, alpha=-group['lr'])
 
  

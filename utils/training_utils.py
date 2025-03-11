@@ -77,6 +77,10 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
     correct = 0
     total = 0
 
+    kfac = False
+    if net.approx == "kfac":
+        kfac = True
+
     lr_scheduler.step()
     desc = ('[%s][LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)' %
             (tag, lr_scheduler.get_lr()[0], 0, 0, correct, total))
@@ -90,21 +94,24 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
         inputs, targets = inputs.to(device), targets.to(device).float().view(-1, 1)
         optimizer.zero_grad()
         outputs = net(inputs)
+        outputs[0].data = torch.clamp(outputs[0].data, min=-10, max=10)
   
-        loss = pac_bayes_loss2(outputs, targets)
-        #loss = bce_loss(outputs[0], targets)
+        #loss = pac_bayes_loss2(outputs, targets, kfac=kfac)
+        loss = bce_loss(outputs[0], targets)
 
         optimizer.acc_stats = True
         
+        
+
         # for updating the kfactors
-        if optim_name in ['kfac', 'ekfac'] and optimizer.steps % optimizer.T_stats == 0:
+        if optim_name in ['kfac', 'ekfac', 'noisy-kfac'] and optimizer.steps % optimizer.T_stats == 0:
             # compute true fisher
             optimizer.acc_stats = True
             with torch.no_grad():
                 sampled_y = torch.multinomial(torch.nn.functional.softmax(outputs[0].data, dim=1),
                                               1).squeeze().float()
-            loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1))
-            #loss_sample = bce_loss(outputs[0], sampled_y.unsqueeze(1))
+            #loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1), kfac=kfac)
+            loss_sample = bce_loss(outputs[0], sampled_y.unsqueeze(1))
             loss_sample.backward(retain_graph=True)
             optimizer.acc_stats = False
             optimizer.zero_grad()  # clear the gradient for computing true-fisher.
@@ -139,13 +146,19 @@ def test_kfac(epoch, net, testloader, lr_scheduler, writer, errs, kls, bces, los
     total = 0
     desc = ('[%s][LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (tag,lr_scheduler.get_lr()[0], test_loss/(0+1), 0, correct, total))
+    
+    kfac = False
+    if net.approx == "kfac":
+        kfac = True
 
     prog_bar = tqdm(enumerate(testloader), total=len(testloader), desc=desc, leave=True)
     with torch.no_grad():
         for batch_idx, (inputs, targets) in prog_bar:
             inputs, targets = inputs.to(device), targets.to(device).float().view(-1, 1)
             outputs = net(inputs)
-            loss = pac_bayes_loss2(outputs, targets)
+            outputs[0].data = torch.clamp(outputs[0].data, min=-10, max=10)
+            print("KL", outputs[1], net.p_log_sigma)
+            loss = pac_bayes_loss2(outputs, targets, kfac=kfac)
             #loss = bce_loss(outputs[0], targets)
 
             test_loss += loss.item()

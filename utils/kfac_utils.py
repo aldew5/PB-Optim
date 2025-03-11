@@ -64,7 +64,7 @@ def update_running_stat(aa, m_aa, stat_decay, module, flag):
     m_aa *= (1 - stat_decay)
     if flag == "A":
         module._A = m_aa
-    else:
+    elif flag == "G":
         module._G = m_aa
 
 
