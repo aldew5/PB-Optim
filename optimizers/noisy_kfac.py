@@ -182,7 +182,6 @@ class NoisyKFAC(optim.Optimizer):
         # p_grad_mat is of output_dim * input_dim
         # inv((ss')) p_grad_mat inv(aa') = [ Q_g (1/R_g) Q_g^T ] @ p_grad_mat @ [Q_a (1/R_a) Q_a^T]
         #(#self.Q_a[m] = self.Q_a[m].type(getattr(torch, self.precision))
-        #print(self.Q[m].dtype)
         v1 = self.Q_g[m].t() @ (p_grad_mat- self.lam/(self.N * self.eta) * m.weights) @ self.Q_a[m]
         v2 = v1 / (self.d_g[m].unsqueeze(1) * self.d_a[m].unsqueeze(0) + damping)
         v = self.Q_g[m] @ v2 @ self.Q_a[m].t()
@@ -199,14 +198,12 @@ class NoisyKFAC(optim.Optimizer):
         param2name = {}
         for name, param in self.model.named_parameters():
             param2name[param] = name
-            #print("NAME", name)
 
         for group in self.param_groups:
             weight_decay = group['weight_decay']
             momentum = group['momentum']
 
             for p in group['params']:
-                #print(param2name[p])
                 grad = p.grad
                 # we want grad wrt weights to update p_mu
                 if "q_mu" in param2name[p]:
@@ -221,7 +218,6 @@ class NoisyKFAC(optim.Optimizer):
                     continue
                 d_p = grad
                 param_name = param2name.get(p, "<unknown>")
-                #print("NAME", param2name[param])
                 
                 # update to prior std (ignore momentum)
                 #print("PARAM NAME", param_name)
@@ -247,10 +243,8 @@ class NoisyKFAC(optim.Optimizer):
                     d_p = buf
 
                 #update param
-                #print("name", param_name)
                 p.data.add_(d_p, alpha=-group['lr'])
 
- 
 
     def step(self, closure=None):
         # FIXME(CW): temporal fix for compatibility with Official LR scheduler.
@@ -259,8 +253,6 @@ class NoisyKFAC(optim.Optimizer):
         damping = group['damping']
         updates = {}
         for m in self.modules:
-            #print(m)
-            #if not m.training: continue
             classname = m.__class__.__name__
             if self.steps % self.T_inv == 0:
                 self._update_inv(m, damping)
