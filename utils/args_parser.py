@@ -45,6 +45,9 @@ class ArgsParser():
 
         parser.add_argument('--precision', default="float32", type=str)
         parser.add_argument('--approx', default="diagonal", type=str)
+        parser.add_argument('--loss', default="bce", type=str)
+        parser.add_argument("--save", default=False, type=bool, help="Save kronecker factors to prior")
+        parser.add_argument("--evaluate", default=True, type=bool, help="Compute final PAC-Bayes bound")
         
 
         parser.add_argument('--prefix', default=None, type=str)

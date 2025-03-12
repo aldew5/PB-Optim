@@ -71,7 +71,7 @@ def train_sgd(model: nn.Module,
     return losses, errors, kls, bces
 
 
-def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_name, tag="kfac"):
+def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_name, loss_type="bce", tag="kfac"):
     print('\nEpoch: %d' % epoch)
     train_loss = 0
     correct = 0
@@ -95,9 +95,12 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
         optimizer.zero_grad()
         outputs = net(inputs)
         outputs[0].data = torch.clamp(outputs[0].data, min=-10, max=10)
-  
-        #loss = pac_bayes_loss2(outputs, targets, kfac=kfac)
-        loss = bce_loss(outputs[0], targets)
+
+        if loss_type == "bce":
+             loss = bce_loss(outputs[0], targets)
+        else:
+            loss = pac_bayes_loss2(outputs, targets, kfac=False)
+       
 
         optimizer.acc_stats = True
         
@@ -110,8 +113,11 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
             with torch.no_grad():
                 sampled_y = torch.multinomial(torch.nn.functional.softmax(outputs[0].data, dim=1),
                                               1).squeeze().float()
-            #loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1), kfac=kfac)
-            loss_sample = bce_loss(outputs[0], sampled_y.unsqueeze(1))
+            if loss_type == "bce":
+                loss_sample = bce_loss(outputs[0], sampled_y.unsqueeze(1))
+            else:
+                loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1), kfac=False)
+            
             loss_sample.backward(retain_graph=True)
             optimizer.acc_stats = False
             optimizer.zero_grad()  # clear the gradient for computing true-fisher.
@@ -137,7 +143,7 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
     
 
 
-def test_kfac(epoch, net, testloader, lr_scheduler, writer, errs, kls, bces, losses, tag="kfac"):
+def test_kfac(epoch, net, testloader, lr_scheduler, writer, errs, kls, bces, losses, loss_type="bce", tag="kfac"):
     global best_acc
     net.eval()
     net.flag = 'eval'
@@ -157,9 +163,11 @@ def test_kfac(epoch, net, testloader, lr_scheduler, writer, errs, kls, bces, los
             inputs, targets = inputs.to(device), targets.to(device).float().view(-1, 1)
             outputs = net(inputs)
             outputs[0].data = torch.clamp(outputs[0].data, min=-10, max=10)
-            print("KL", outputs[1], net.p_log_sigma)
-            loss = pac_bayes_loss2(outputs, targets, kfac=kfac)
-            #loss = bce_loss(outputs[0], targets)
+            #print("KL", outputs[1], net.p_log_sigma)
+            if loss_type == "bce":
+                loss = bce_loss(outputs[0], targets)
+            else:
+                loss = pac_bayes_loss2(outputs, targets, kfac=kfac)
 
             test_loss += loss.item()
             preds = torch.round(torch.sigmoid(outputs[0]))

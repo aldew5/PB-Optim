@@ -10,6 +10,7 @@ def pac_bayes_loss(outputs, labels, m, b, c, pi, delta, kfac=False):
     """
     preds, kl, log_lam = outputs
 
+    # optimization is also over log lam
     if not kfac:
         # log_lam is log std, we want variance so 2*log_lam
         # ensure separate gradient for log_lam
@@ -21,8 +22,6 @@ def pac_bayes_loss(outputs, labels, m, b, c, pi, delta, kfac=False):
     else:
         val = torch.sqrt((kl + torch.log(m/delta))/(2*(m-1)))
 
-    print("KL:", kl)
-    print("LOG LAM", log_lam)
     # weak bound on KL^{-1}
     return bce_loss(preds, labels) + val
 

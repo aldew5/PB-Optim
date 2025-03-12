@@ -25,8 +25,6 @@ trainloader, testloader = get_bMNIST(args.precision, batch_size=100)
 w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
 w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
 
-
-
 # init optimizer and lr scheduler
 optim_name = args.optimizer.lower()
 tag = optim_name
@@ -59,6 +57,9 @@ else:
     lr_scheduler = MultiStepLR(optimizer, milestones=milestone, gamma=0.1)
 
 
+if (optim_name == "adam" or optim_name == "sgd") and args.approx == "kfac":
+    raise ValueError(f"Cannot use {optim_name} to optimize a kfactored posterior")
+
 
 # init criterion
 bce_loss = nn.BCEWithLogitsLoss()
@@ -82,10 +83,10 @@ if not os.path.isdir(log_dir):
 writer = SummaryWriter(log_dir)
 kls, bces, errs, bounds, losses = [], [], [], [], []
 
-
-if optim_name == "sgd":
+# separate lighter weight training routine for first-order optimizers
+if optim_name == "sgd" or optim_name == "adam":
     if not LOAD_DATA:
-        bnn_losses, bnn_errors, kls, bces = train_sgd(net, args.epochs, optimizer, lr_scheduler, trainloader, pac_bayes_loss2, device)
+        bnn_losses, bnn_errors, kls, bces = train_sgd(net, args.epoch, optimizer, lr_scheduler, trainloader, pac_bayes_loss2, device)
 
         N_samples = 10
         plot = True
@@ -103,16 +104,18 @@ if optim_name == "sgd":
 else:
     net.train()
     for epoch in range(start_epoch, args.epoch):
-        train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_name)
-        test_kfac(epoch, net, testloader, lr_scheduler, writer, errs, kls, bces, losses)
+        train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_name, loss=args.loss)
+        test_kfac(epoch, net, testloader, lr_scheduler, writer, errs, kls, bces, losses, loss=args.loss)
 
     N_samples = 2
     #plot = False
-    save_plot = False    
-    for i, layer in enumerate(net.layers):
-        torch.save(layer.A_inv, f'priors/A_inv{i}.pt')
-        torch.save(layer.G_inv, f'priors/G_inv{i}.pt')
-    #evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, \
-    #                 errors=errs, kls=kls, bces=bces, plot=False, save_plot=save_plot)
-    
+    save_plot = False   
+    if args.save: 
+        for i, layer in enumerate(net.layers):
+            torch.save(layer.A_inv, f'priors/A{i}.pt')
+            torch.save(layer.G_inv, f'priors/G{i}.pt')
+    if args.evaluate:
+        evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, \
+                        errors=errs, kls=kls, bces=bces, plot=False, save_plot=save_plot)
+        
     plot(bces, kls, errs, bounds)
