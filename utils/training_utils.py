@@ -43,7 +43,8 @@ def train_sgd(model: nn.Module,
 
         outputs = None
         for inputs, labels in trainloader:
-            with optimizer.sampled_params(train=True):
+            cm = optimizer.sampled_params(train=True) if isinstance(optimizer, IVON) else contextlib.nullcontext()
+            with cm:
                 optimizer.zero_grad()
                 
                 inputs, labels = inputs.to(device), labels.to(device).float().view(-1, 1)
@@ -64,10 +65,10 @@ def train_sgd(model: nn.Module,
         losses.append(running_loss)
         bces.append(bce_loss(preds, labels).clone().detach())
         errors.append(1-running_acc)
-        kls.append(outputs[1].clone().detach())
+       # kls.append(outputs[1].clone().detach())
         
         scheduler.step()
-        print("KL:", outputs[1])
+        #print("KL:", outputs[1])
         print('Epoch: {:04d}'.format(epoch+1),
             'loss_train: {:.4f}'.format(running_loss),
             'acc_train: {:.4f}'.format(running_acc),

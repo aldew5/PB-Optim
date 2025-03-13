@@ -7,7 +7,7 @@ from pathlib import Path
 
 from data.dataloader import get_bMNIST
 from utils.seed import set_seed
-from utils.training_util import train
+from utils.training_utils import train_sgd
 from utils.evaluate import evaluate_MLP
 from utils.config import *
 
@@ -30,15 +30,15 @@ learning_rate = 1e-2
 momentum= 0.9
 
 # training
-trainloader, testloader = get_bMNIST(batch_size)
-optimizer = optim.SGD(mlp_model.parameters(), lr=learning_rate, momentum=momentum)
+trainloader, testloader = get_bMNIST("float32", batch_size=100)
+optimizer = optim.Adam(mlp_model.parameters(), lr=learning_rate)
 scheduler = StepLR(optimizer, step_size=10, gamma=1) 
 bce_loss = nn.BCEWithLogitsLoss()
 
 def bce_loss2(outputs, labels):
     return bce_loss(outputs[0], labels)
 
-mlp_losses, mlp_accs = train(mlp_model, epochs, optimizer, scheduler, trainloader, bce_loss2, device)
+mlp_losses, mlp_accs = train_sgd(mlp_model, epochs, optimizer, scheduler, trainloader, bce_loss2, device)
 evaluate_MLP(mlp_model, testloader, device, mlp_losses, mlp_accs, plot=True, save_plot=False)
 
 # extract and save weights
