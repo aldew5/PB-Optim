@@ -1,5 +1,5 @@
 # Optimizing PAC-Bayes 
-Using second-order methods to optimize PAC-Bayes bounds. This will be a flexible framework for optimizing different structured posteriors which has applications in many other domains.
+Using natural gradient optimizers to optimize PAC-Bayes bounds. This will be a flexible framework for optimizing different structured posteriors which has applications in many other domains.
 
 To run noisy KFAC on kfactored posterior for 10 epochs:
 
