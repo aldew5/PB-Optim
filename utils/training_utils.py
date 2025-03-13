@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 from models.mlp import MLP
 from models.bnn import BayesianNN
 from utils.config import *
+from optimizers.ivon import IVON
+import contextlib
 
 import time
 
@@ -27,7 +29,7 @@ def train_sgd(model: nn.Module,
     
     m = len(trainloader.dataset)
     start_t = time.time()
-    
+    loss_fn = bce_loss
     losses = []
     errors = []
     kls = []
@@ -41,12 +43,15 @@ def train_sgd(model: nn.Module,
 
         outputs = None
         for inputs, labels in trainloader:
-            optimizer.zero_grad()
-            
-            inputs, labels = inputs.to(device), labels.to(device).float().view(-1, 1)
-            outputs = model(inputs)
-            loss_size = loss_fn(outputs, labels)
-            loss_size.backward()
+            with optimizer.sampled_params(train=True):
+                optimizer.zero_grad()
+                
+                inputs, labels = inputs.to(device), labels.to(device).float().view(-1, 1)
+                outputs = model(inputs)
+                loss_size = loss_fn(outputs[0], labels)
+                #print(loss_size)
+
+                loss_size.backward()
 
             optimizer.step()
 
@@ -94,18 +99,16 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
         inputs, targets = inputs.to(device), targets.to(device).float().view(-1, 1)
         optimizer.zero_grad()
         outputs = net(inputs)
-        outputs[0].data = torch.clamp(outputs[0].data, min=-10, max=10)
+        outputs[0].data = torch.clamp(outputs[0].data, min=-5, max=5)
 
         if loss_type == "bce":
              loss = bce_loss(outputs[0], targets)
         else:
             loss = pac_bayes_loss2(outputs, targets, kfac=False)
        
-
+        #print(outputs[0])
         optimizer.acc_stats = True
         
-        
-
         # for updating the kfactors
         if optim_name in ['kfac', 'ekfac', 'noisy-kfac'] and optimizer.steps % optimizer.T_stats == 0:
             # compute true fisher

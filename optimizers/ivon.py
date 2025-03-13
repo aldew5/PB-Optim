@@ -7,8 +7,6 @@ import torch.distributed as dist
 from torch import Tensor
 
 
-### CODE FROM LIN ET AL. ###
-
 ClosureType = Callable[[], Tensor]
 
 
@@ -30,13 +28,13 @@ class IVON(torch.optim.Optimizer):
         hess_init: float = 1.0,
         beta1: float = 0.9,
         beta2: float = 0.99999,
-        weight_decay: float = 1e-4,
+        weight_decay: float = 0,
         mc_samples: int = 1,
         hess_approx: str = 'price',
         clip_radius: float = float("inf"),
         sync: bool = False,
         debias: bool = True,
-        rescale_lr: bool = True,
+        rescale_lr: bool = True
     ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -145,6 +143,7 @@ class IVON(torch.optim.Optimizer):
 
                 p_slice = slice(offset, offset + p.numel())
 
+                #print(p.data)
                 p.data = param_avg[p_slice].view(p.shape)
                 if train:
                     if p.requires_grad:
@@ -182,7 +181,7 @@ class IVON(torch.optim.Optimizer):
         if self.sync and dist.is_initialized():  # explicit sync
             self._sync_samples()
         self._update()
-        self._samples()
+        self._reset_samples()
         return loss
 
     def _sync_samples(self):

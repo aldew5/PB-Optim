@@ -50,7 +50,6 @@ class BayesianNN(nn.Module):
                                   approx=approx, precision=precision, lam=lam, N=N, optimizer=optimizer)
 
         self.layers = [self.bl1, self.bl2, self.bl3]
-        self.flag = "train" # updated for eval
     
 
 
@@ -76,6 +75,6 @@ class BayesianNN(nn.Module):
             p_log_sigma = self.p_log_sigma
 
         
-        return self.bl1.kl_divergence(p_log_sigma=p_log_sigma, flag=self.flag) + self.bl2.kl_divergence(p_log_sigma=p_log_sigma, flag=self.flag) +\
-                self.bl3.kl_divergence(p_log_sigma=p_log_sigma, flag=self.flag)
+        return self.bl1.kl_divergence(p_log_sigma=p_log_sigma) + self.bl2.kl_divergence(p_log_sigma=p_log_sigma) +\
+                self.bl3.kl_divergence(p_log_sigma=p_log_sigma)
     

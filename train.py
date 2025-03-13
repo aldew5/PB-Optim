@@ -1,11 +1,12 @@
 import os
-from optimizers.kfac import KFACOptimizer
-from optimizers.noisy_kfac import NoisyKFAC
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import MultiStepLR, StepLR
 from models.bnn import BayesianNN
+from optimizers.kfac import KFACOptimizer
+from optimizers.noisy_kfac import NoisyKFAC
+from optimizers.ivon import IVON
 
 from tensorboardX import SummaryWriter
 from data.dataloader import get_bMNIST
@@ -15,6 +16,7 @@ from utils.training_utils import *
 from utils.config import *
 import matplotlib.pyplot as plt
 from utils.args_parser import ArgsParser
+from models.mlp import MLP
 
 parser = ArgsParser()
 args = parser.parse_args()
@@ -31,6 +33,9 @@ tag = optim_name
 
 #TODO: empirical good choice for p log sigma
 net = BayesianNN(w0, w1, p_log_sigma=-1.16,  approx=args.approx, optimizer=optim_name, precision=args.precision).to(device)
+#net = MLP()
+#net.train()
+#model = MLP()
 
 if optim_name == 'sgd':
     optimizer = optim.SGD(net.parameters(),
@@ -44,6 +49,8 @@ elif optim_name == 'noisy-kfac':
                           weight_decay=0, N=len(trainloader), precision=args.precision)    
 elif optim_name == "kfac":
     optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
+elif optim_name == "ivon":
+    optimizer = IVON(net.parameters(), lr=args.learning_rate, ess=len(trainloader))
 else:
     raise NotImplementedError
 
@@ -83,8 +90,8 @@ if not os.path.isdir(log_dir):
 writer = SummaryWriter(log_dir)
 kls, bces, errs, bounds, losses = [], [], [], [], []
 
-# separate lighter weight training routine for first-order optimizers
-if optim_name == "sgd" or optim_name == "adam":
+# NOTE: temporary separate training for IVON
+if optim_name == "ivon":
     if not LOAD_DATA:
         bnn_losses, bnn_errors, kls, bces = train_sgd(net, args.epoch, optimizer, lr_scheduler, trainloader, pac_bayes_loss2, device)
 
@@ -104,8 +111,8 @@ if optim_name == "sgd" or optim_name == "adam":
 else:
     net.train()
     for epoch in range(start_epoch, args.epoch):
-        train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_name, loss=args.loss)
-        test_kfac(epoch, net, testloader, lr_scheduler, writer, errs, kls, bces, losses, loss=args.loss)
+        train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_name, loss_type=args.loss)
+        test_kfac(epoch, net, testloader, lr_scheduler, writer, errs, kls, bces, losses, loss_type=args.loss)
 
     N_samples = 2
     #plot = False

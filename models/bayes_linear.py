@@ -76,11 +76,11 @@ class BayesianLinear(nn.Module):
         
 
         else:
-            if optimizer == "sgd" or optimizer  == "adam":
-                self.q_log_sigma = nn.Parameter(torch.cat((0.5 * torch.log(torch.abs(init_q["weight"].to(getattr(torch, precision)))), \
-                                                   0.5 * torch.log(torch.abs(init_q["bias"])).unsqueeze(1).to(getattr(torch, precision))), dim=1)) 
-                self.q_mu = nn.Parameter(torch.cat((init_q["weight"], init_q['bias'].unsqueeze(1)), dim=1)) 
-                #print("HERE IN INIT", optimizer)
+            if optimizer == "sgd" or optimizer  == "adam" or optimizer=="ivon":
+                self.q_log_sigma = nn.Parameter(torch.cat((0.5 * torch.log(torch.abs(init_q["weight"].to(getattr(torch, precision)) )), \
+                                                   0.5 * torch.log(torch.abs(init_q["bias"].to(getattr(torch, precision)) )).unsqueeze(1)), dim=1))
+                self.q_mu = nn.Parameter(torch.cat((init_q["weight"].to(getattr(torch, precision)),\
+                                                     init_q['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1))#.to(getattr(torch, precision))
             else:
                 # F \approx A \otimes G
                 self.A_inv = 0.3* torch.eye(self.in_features + 1, dtype=getattr(torch, precision))
@@ -114,7 +114,7 @@ class BayesianLinear(nn.Module):
             
             # unconstrained optimization over log q_sigma
             # NOTE: weight.data update is async and does not occur ontime in the sgd/adam case
-            if self.optimizer == "sgd" or self.optimizer == "adam":
+            if self.optimizer == "sgd" or self.optimizer == "adam" or self.optimizer=="ivon":
                 q_sigma = torch.exp(self.q_log_sigma)
                
                 weights = self.q_mu + torch.sqrt(q_sigma) * torch.randn_like(q_sigma)
@@ -229,6 +229,7 @@ class BayesianLinear(nn.Module):
         # Reshape (q_mu - p_mu) into an (m x n) matrix.
         delta = (q_mu - p_mu).view(m, n)
         # Using the identity: vec(Δ)^T (p_G ⊗ p_A) vec(Δ) = trace(p_A Δ^T p_G Δ)
+        #print(p_A.dtype, delta.dtype, p_G.dtype)
         quadratic_term = torch.trace(p_A @ delta.T @ p_G @ delta)
         
         kl = 0.5 * (logdet_term - d_total + trace_term + quadratic_term)
