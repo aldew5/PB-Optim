@@ -49,8 +49,7 @@ class BayesianNN(nn.Module):
         self.bl3 = BayesianLinear(2, hidden_features, 1, init_p_weights[2], init_q_weights[2], 
                                   approx=approx, precision=precision, lam=lam, N=N, optimizer=optimizer)
 
-        self.layers = [self.bl1, self.bl2, self.bl3]
-    
+        self.layers = [self.bl1, self.bl2, self.bl3]    
 
 
     def forward(self, x, p_log_sigma=None):

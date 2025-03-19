@@ -15,27 +15,27 @@ import contextlib
 
 import time
 
-SUPPORTED_MODELS = [BayesianNN, MLP]
+SUPPORTED_NETS = [BayesianNN, MLP]
 bce_loss = nn.BCEWithLogitsLoss()
 
 
-def train_sgd(model: nn.Module,
+def train_sgd(net: nn.Module,
           num_epochs: int, 
           optimizer: torch.optim.Optimizer, 
           scheduler: torch.optim.lr_scheduler, 
           trainloader: DataLoader, 
           loss_fn: nn.Module,
-          device: str) -> tuple[list[float], list[float]]:
+          device: str,
+          optim_name="ivonpb") -> tuple[list[float], list[float]]:
     
     m = len(trainloader.dataset)
     start_t = time.time()
-    loss_fn = bce_loss
     losses = []
     errors = []
     kls = []
     bces = []
 
-    model.train()
+    net.train()
 
     for epoch in range(num_epochs):
         running_loss = 0.
@@ -43,13 +43,22 @@ def train_sgd(model: nn.Module,
 
         outputs = None
         for inputs, labels in trainloader:
-            cm = optimizer.sampled_params(train=True) if isinstance(optimizer, IVON) else contextlib.nullcontext()
+            cm = optimizer.sampled_params(train=True) if (optim_name == "ivon" or optim_name=='ivonpb') else contextlib.nullcontext()
             with cm:
                 optimizer.zero_grad()
                 
                 inputs, labels = inputs.to(device), labels.to(device).float().view(-1, 1)
-                outputs = model(inputs)
-                loss_size = loss_fn(outputs[0], labels)
+                outputs = net(inputs)
+
+                # give ivonpb access to KL(q || p) and d/dmu L2
+                if optim_name == 'ivonpb':
+                    lam = torch.exp(net.p_log_sigma)
+                    kl = outputs[1].item()
+
+                    optimizer.state['kl'] = kl
+                    optimizer.state['lam'] = lam
+
+                loss_size = loss_fn(outputs, labels)
                 #print(loss_size)
 
                 loss_size.backward()
@@ -105,8 +114,8 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
         if loss_type == "bce":
              loss = bce_loss(outputs[0], targets)
         else:
-            loss = pac_bayes_loss2(outputs, targets, kfac=False)
-       
+            loss = pac_bayes_loss2(outputs, targets, option="1")
+
         #print(outputs[0])
         optimizer.acc_stats = True
         
@@ -120,7 +129,7 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
             if loss_type == "bce":
                 loss_sample = bce_loss(outputs[0], sampled_y.unsqueeze(1))
             else:
-                loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1), kfac=False)
+                loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1), option="1")
             
             loss_sample.backward(retain_graph=True)
             optimizer.acc_stats = False

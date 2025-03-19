@@ -7,6 +7,7 @@ from models.bnn import BayesianNN
 from optimizers.kfac import KFACOptimizer
 from optimizers.noisy_kfac import NoisyKFAC
 from optimizers.ivon import IVON
+from optimizers.ivon_pb import IVONPB
 
 from tensorboardX import SummaryWriter
 from data.dataloader import get_bMNIST
@@ -14,15 +15,14 @@ from utils.pac_bayes_loss import pac_bayes_loss2
 from utils.evaluate import evaluate_BNN
 from utils.training_utils import *
 from utils.config import *
-import matplotlib.pyplot as plt
 from utils.args_parser import ArgsParser
-from models.mlp import MLP
 
 parser = ArgsParser()
 args = parser.parse_args()
 
 # init dataloader
 trainloader, testloader = get_bMNIST(args.precision, batch_size=100)
+print('SIZE', len(trainloader) + len(testloader))
 
 w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
 w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
@@ -51,6 +51,9 @@ elif optim_name == "kfac":
     optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
 elif optim_name == "ivon":
     optimizer = IVON(net.parameters(), lr=args.learning_rate, ess=len(trainloader))
+elif optim_name == 'ivonpb':
+    lam = torch.exp(net.p_log_sigma)
+    optimizer = IVONPB(net, net.parameters(), lr=args.learning_rate, ess=len(trainloader), delta=delta, lam=lam)
 else:
     raise NotImplementedError
 
@@ -91,7 +94,7 @@ writer = SummaryWriter(log_dir)
 kls, bces, errs, bounds, losses = [], [], [], [], []
 
 # NOTE: temporary separate training for IVON
-if optim_name == "ivon":
+if optim_name == "ivon" or optim_name == 'ivonpb':
     if not LOAD_DATA:
         bnn_losses, bnn_errors, kls, bces = train_sgd(net, args.epoch, optimizer, lr_scheduler, trainloader, pac_bayes_loss2, device)
 

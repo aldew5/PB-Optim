@@ -76,7 +76,12 @@ class BayesianLinear(nn.Module):
         
 
         else:
-            if optimizer == "sgd" or optimizer  == "adam" or optimizer=="ivon":
+            if optimizer == 'ivonpb':
+                self.q_sigma = nn.Parameter(torch.cat((0.5 *torch.abs(init_q["weight"].to(getattr(torch, precision) )), \
+                                                   0.5 * torch.abs(init_q["bias"].to(getattr(torch, precision))).unsqueeze(1)), dim=1), requires_grad=False)
+                self.q_mu = nn.Parameter(torch.cat((init_q["weight"].to(getattr(torch, precision)),\
+                                                     init_q['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1))#.to(getattr(torch, precision))
+            elif optimizer == "sgd" or optimizer  == "adam" or optimizer=="ivon":
                 self.q_log_sigma = nn.Parameter(torch.cat((0.5 * torch.log(torch.abs(init_q["weight"].to(getattr(torch, precision)) )), \
                                                    0.5 * torch.log(torch.abs(init_q["bias"].to(getattr(torch, precision)) )).unsqueeze(1)), dim=1))
                 self.q_mu = nn.Parameter(torch.cat((init_q["weight"].to(getattr(torch, precision)),\
@@ -94,7 +99,6 @@ class BayesianLinear(nn.Module):
             self.q_bias_mu = None
             
 
-
     def forward(self, x, p_log_sigma):
         if self.approx == 'kfac':
             x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1).type(getattr(torch, self.precision))
@@ -107,18 +111,24 @@ class BayesianLinear(nn.Module):
             outputs = F.linear(x, self.weights, torch.zeros(self.out_features).type(getattr(torch, self.precision)))
 
         # diagonal approximation
-        else:
+        elif self.approx == "diagonal":
             # append a column of 1's for bias term
             x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1).type(getattr(torch, self.precision))
             p_sigma = torch.exp(p_log_sigma)
+
+            if self.optimizer == 'ivonpb':
+                weights = self.q_mu + self.q_sigma * torch.randn_like(self.q_sigma)
+                outputs = F.linear(x, weights, torch.zeros(self.out_features).type(getattr(torch, self.precision)))
+                kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, self.q_sigma)
             
             # unconstrained optimization over log q_sigma
             # NOTE: weight.data update is async and does not occur ontime in the sgd/adam case
-            if self.optimizer == "sgd" or self.optimizer == "adam" or self.optimizer=="ivon":
+            elif self.optimizer == "sgd" or self.optimizer == "adam" or self.optimizer=="ivon":
                 q_sigma = torch.exp(self.q_log_sigma)
                
                 weights = self.q_mu + torch.sqrt(q_sigma) * torch.randn_like(q_sigma)
                 outputs = F.linear(x, weights, torch.zeros(self.out_features).type(getattr(torch, self.precision)))
+                kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
             # q sigma via diagonal learned kfactors
             else:
                 diag_G_inv, diag_A_inv = torch.diag(self.G_inv), self.lam/self.N * torch.diag(self.A_inv)
@@ -127,7 +137,9 @@ class BayesianLinear(nn.Module):
 
                 outputs = F.linear(x, self.weights, torch.zeros(self.out_features).type(getattr(torch, self.precision)))
 
-            kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
+                kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
+        else:
+            raise ValueError(f"{self.approx} approximation not implemented")
 
         return outputs, kl
     
@@ -144,7 +156,10 @@ class BayesianLinear(nn.Module):
         p_sigma = torch.exp(p_log_sigma)
         
         if self.approx == 'diagonal':
-            q_sigma = torch.exp(self.q_log_sigma)
+            if self.optimizer == 'ivonpb':
+                q_sigma = self.q_sigma
+            else:
+                q_sigma = torch.exp(self.q_log_sigma)
             kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
         else:
             kl = self.kl_divergence_both_kfactored(self._G.shape[0], self._A.shape[0])
