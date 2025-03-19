@@ -251,6 +251,8 @@ class IVONPB(torch.optim.Optimizer):
                 param_avgs.append(p_avg)
                 if "sigma" not in self.param_name_map.get(id(p), ""):
                     p.data = (p_avg + p_noise).view(p.shape)
+                else:
+                    p.data = p_avg.view(p.shape)
                 goffset += numel
                 offset += numel
             assert goffset == group["numel"]  # sanity check
@@ -322,12 +324,15 @@ class IVONPB(torch.optim.Optimizer):
                 numel = p.numel()
                 # Look up the name using the parameter's id
                 name = self.param_name_map.get(id(p), "")
+                #print("Name", name)
                 if "mu" in name:
                     mu_indices.append((group_offset, group_offset + numel))
+               
                     
                 group_offset += numel
 
             if mu_indices:
+                #print("IN MU")
                 # Extract the portions of param_avg and m_bar_full corresponding to mu parameters.
                 mu_param_avg = torch.cat([param_avg[start:end] for start, end in mu_indices], dim=0)
                 m_bar_mu = torch.cat([m_bar_full[start:end] for start, end in mu_indices], dim=0)
@@ -337,25 +342,30 @@ class IVONPB(torch.optim.Optimizer):
                 update_vec = (m_bar_mu + self.lam * mu_param_avg/(2 * c2* l2)) / denom2_mu.clamp_min(1e-12)
                 update_vec = torch.clamp(update_vec, min=-group["clip_radius"], max=group["clip_radius"])
 
-                # Now update only the mu entries in the overall parameter vector.
                 new_param_avg = param_avg.clone()
-                # We need to replace the slices corresponding to mu parameters.
+
                 for start, end in mu_indices:
                     slice_len = end - start
                     new_param_avg[start:end] = param_avg[start:end] - lr * update_vec[:slice_len]
                     update_vec = update_vec[slice_len:]
             else:
-                # If there are no "mu" parameters in this group, leave param_avg unchanged.
-                new_param_avg = torch.sqrt(1/(group['ess'] * group['hess']))
-                #new_param_avg = param_avg
+                #print("HERE", self.param_name_map.get(id(p), ""))
+                #new_param_avg = torch.sqrt(1/(group['ess'] * group['hess']))
+                new_param_avg = param_avg
 
             # Update the actual parameters in the group.
             pg_offset = 0
             for p in group["params"]:
                 if p is not None:
                     numel = p.numel()
+                    name = self.param_name_map.get(id(p), "")
                     #print(self.param_name_map.get(id(p), ""), p.data)
-                    p.data = new_param_avg[pg_offset:pg_offset + numel].view(p.shape)
+                    if "mu" in name:
+                        p.data = new_param_avg[pg_offset:pg_offset + numel].view(p.shape)
+                    elif "q_sigma" in name:
+                        p.data = torch.sqrt(1/(group['ess'] * group['hess']))
+                    elif "p_log_sigma" in name:
+                        p.data -= lr * p.grad
                     pg_offset += numel
             assert pg_offset == group["numel"], "Mismatch in parameter update sizes."
             offset += group["numel"]

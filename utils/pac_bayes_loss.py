@@ -22,10 +22,10 @@ def pac_bayes_loss(outputs, labels, m, b, c, pi, delta, option="1"):
         val = torch.sqrt((kl + torch.log(m/delta))/(2*(m-1)))
     # pac-bayes for IVON PB
     else:
-        val =torch.sqrt((kl + torch.log(m/delta))/(2 * (m-1)))
+        val = 1/m * torch.sqrt((kl + torch.log(m/delta))/(2 * (m-1)))
 
-    print('VAL', val)
     # weak bound on KL^{-1}
+    #print("KL", kl, log_lam)
     return bce_loss(preds, labels) + val
 
 
