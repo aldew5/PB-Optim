@@ -8,10 +8,11 @@ from optimizers.kfac import KFACOptimizer
 from optimizers.noisy_kfac import NoisyKFAC
 from optimizers.ivon import IVON
 from optimizers.ivon_pb import IVONPB
+from optimizers.noisy_kfac_pb import NoisyKFACPB
 
 from tensorboardX import SummaryWriter
 from data.dataloader import get_bMNIST
-from utils.pac_bayes_loss import pac_bayes_loss2
+from utils.pac_bayes import pac_bayes_loss2
 from utils.evaluate import evaluate_BNN
 from utils.training_utils import *
 from utils.config import *
@@ -22,7 +23,6 @@ args = parser.parse_args()
 
 # init dataloader
 trainloader, testloader = get_bMNIST(args.precision, batch_size=100)
-print('SIZE', len(trainloader) + len(testloader))
 
 w0 = torch.load('./checkpoints/mlp/w0.pt', weights_only=True)
 w1 = torch.load('./checkpoints/mlp/w1.pt', weights_only=True)
@@ -46,7 +46,10 @@ elif optim_name == "adam":
     optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
 elif optim_name == 'noisy-kfac':
     optimizer = NoisyKFAC(net, T_stats=1, T_inv=10,  lr=1e-3, damping=0.001, 
-                          weight_decay=0, N=len(trainloader), precision=args.precision)    
+                          weight_decay=0, N=len(trainloader), precision=args.precision)  
+elif optim_name == 'noisy-kfac-pb':
+    optimizer = NoisyKFACPB(net, T_stats=1, T_inv=10,  lr=1e-3, damping=0.001, 
+                          weight_decay=0, N=len(trainloader), precision=args.precision, batch_size=100)    
 elif optim_name == "kfac":
     optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
 elif optim_name == "ivon":

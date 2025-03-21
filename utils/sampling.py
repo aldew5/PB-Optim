@@ -49,7 +49,7 @@ def sample_from_kron_dist(q_mu, A, G, epsilon=1e-2):
     return samples
 
 
-def sample_matrix_normal(q_mu, A_inv, G_inv, lam, N, epsilon=1e-2, precision="float32"):
+def sample_matrix_normal(q_mu, A_inv, G_inv, lam, N, epsilon=1e-8, precision="float32"):
     """
     Sample from a multivariate normal distribution
         N(q_mu, G^{-1} ⊗ A^{-1})

@@ -2,12 +2,11 @@ import torch
 import torch.optim as optim
 from utils.kfac_utils import *
 import math
+from utils.pac_bayes import compute_b
 
 
-# TODO: I don't calculate damping as in their paper
 
-
-class NoisyKFAC(optim.Optimizer):
+class NoisyKFACPB(optim.Optimizer):
     def __init__(self, 
             model,
             N=60000,
@@ -16,14 +15,15 @@ class NoisyKFAC(optim.Optimizer):
             beta: float = 1e-2,
             weight_decay: float = 1e-4,
             momentum=0.9, # for updating kfactors
-            lam: int = 0.5,
+            lam: int = 0.5, # kl weighting
             kl_clip=0.001,
-            eta= 0.098, #prior variance for p_log_sigma fixed
+            eta= 1.0, #prior variance for p_log_sigma fixed
             T_stats=10,
             T_inv=100,
             gamma_ex=1e-3,
             batch_averaged=True,
-            precision="float32"
+            precision="float32",
+            batch_size=100
         ):
         params = [p for p in model.parameters() if p.requires_grad]
         defaults = dict(lr=lr, momentum=momentum, damping=damping,
@@ -49,6 +49,12 @@ class NoisyKFAC(optim.Optimizer):
         self.N = N
         self.kl_clip = kl_clip
         self.precision = precision
+
+        # for computing b term in linear pac-bayes objective
+        # computed during the forward pass
+        self.kl = 1000000 
+        self.bce_loss = 0.5
+        self.batch_size = batch_size
 
         # only for kfac-enabled BNNs
         #assert(model.kfac)
@@ -115,18 +121,23 @@ class NoisyKFAC(optim.Optimizer):
         self.d_a[layer].mul_((self.d_a[layer] > eps).float())
         self.d_g[layer].mul_((self.d_g[layer] > eps).float())
 
+        # update KL weighting to reflect new KL, bce_loss
+        b = compute_b(self.kl, self.bce_loss, self.N, self.batch_size)
+        self.lam = 1/(2 * (1 - b) * self.N)
+        damp = torch.sqrt(self.lam/(self.N * self.eta))
+
         # give model access to eigenvectors, etc. for sampling from kfactored distr
-        # NOTE: we scale A_inv by lam/N here
         if self.model.approx != "diagonal":
             layer.dG, layer.dA =  self.d_g[layer], self.d_a[layer]
             layer.Q_G, layer.Q_A = self.Q_a[layer], self.Q_g[layer]
             
-            layer.A_inv = (self.m_aa[layer] + damping * torch.eye(self.m_aa[layer].size(0))).inverse()
-            layer.G_inv = (self.m_gg[layer] + damping * torch.eye(self.m_gg[layer].size(0))).inverse()
+            layer.A_inv = (self.m_aa[layer] + damp * torch.eye(self.m_aa[layer].size(0))).inverse()
+            layer.G_inv = (self.m_gg[layer] + damp * torch.eye(self.m_gg[layer].size(0))).inverse()
+            layer.lam = self.lam
 
         else:
-            layer.A_inv = (self.m_aa[layer] + damping * torch.eye(self.m_aa[layer].size(0))).inverse()
-            layer.G_inv = (self.m_gg[layer] + damping * torch.eye(self.m_gg[layer].size(0))).inverse()
+            layer.A_inv = 1 / self.N * (self.m_aa[layer] + damp * torch.eye(self.m_aa[layer].size(0))).inverse()
+            layer.G_inv = (self.m_gg[layer] + damp * torch.eye(self.m_gg[layer].size(0))).inverse()
 
 
 
@@ -208,23 +219,17 @@ class NoisyKFAC(optim.Optimizer):
                 # we want grad wrt weights to update p_mu
                 if "q_mu" in param2name[p]:
                     for q in group['params']:
-                        #print(param2name[q])
+                        #find weights and set the grad
                         if "weights" in param2name[q] and param2name[q][:3] == param2name[p][:3]:
                             grad = q.grad
                             break
-
-                #print(param2name[p], grad)
+                
                 if grad is None:
                     continue
                 d_p = grad
                 param_name = param2name.get(p, "<unknown>")
                 
-                # update to prior std (ignore momentum)
-                #print("PARAM NAME", param_name)
-                #if "p_log_sigma" in param_name or "q_log_sigma" in param_name:
-                ##    #p.data.add_(-group['lr'], d_p) NOTE: deprecated
-                #    p.data.add_(d_p, alpha=-group['lr'])
-                #    continue
+                # don't update weights, just compute gradients wrt weights to update mu
                 if "weights" in param_name:
                     continue
             

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from data.dataloader import get_bMNIST
 from utils.seed import set_seed
-from utils.pac_bayes_loss import pac_bayes_loss
+from utils.pac_bayes import pac_bayes_loss
 from utils.training_utils import train
 from utils.evaluate import evaluate_BNN
 

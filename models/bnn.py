@@ -12,7 +12,7 @@ class BayesianNN(nn.Module):
                  in_features: int = 784,
                  out_features: int = 1,
                  hidden_features: int = 300,
-                 p_log_sigma: float =-1.16,
+                 p_log_sigma: float = 0,#-1.16,
                  approx="diagonal",
                  precision="float32", 
                  optimizer="sgd",

@@ -61,6 +61,7 @@ def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime,
     p_log_sigma_up = 0.5 * (torch.log(c) - j_up / b)
     p_log_sigma_down = 0.5 * (torch.log(c) - j_down / b)
     
+    """
     kl_up = model.kl_divergence(p_log_sigma_up)
     kl_down = model.kl_divergence(p_log_sigma_down)
     
@@ -70,6 +71,9 @@ def evaluate_BNN(model: BayesianNN, trainloader, testloader, delta, delta_prime,
     else:
         p_log_sigma_disc = p_log_sigma_down
         kl_disc = kl_down
+    """
+    kl_disc = model.kl_divergence(model.p_log_sigma)
+    p_log_sigma_disc = model.p_log_sigma
     
     train_acc = 0
     # compute average empirical error for N_samples

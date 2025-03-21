@@ -11,7 +11,7 @@ from models.bnn import BayesianNN
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 from data.dataloader import get_bMNIST
-from utils.pac_bayes_loss import pac_bayes_loss2
+from utils.pac_bayes import pac_bayes_loss2
 from utils.evaluate import evaluate_BNN
 from utils.config import *
 import matplotlib.pyplot as plt

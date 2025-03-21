@@ -31,3 +31,23 @@ def pac_bayes_loss(outputs, labels, m, b, c, pi, delta, option="1"):
 
 def pac_bayes_loss2(outputs, labels, option="3"):
     return pac_bayes_loss(outputs, labels, m, b, c, pi, delta, option)
+
+
+def compute_b(kl, bce_loss, N, batch_size):
+    """
+    Find b that minimizes the linear PAC-Bayes bound 
+    ("On the role of data in PAC-Bayes bounds", 2017)
+    
+    Notes: 
+    - There are two roots and we take the smaller one (the larger may not be feasible
+    since beta \in (0, 1))
+    - N = |S| and b = beta in the paper's terminology
+    - delta comes from config file
+    """
+    # loss should be 1/B sum errors not 1/N * sum errors
+    batch_loss = bce_loss * N/batch_size 
+    kl_term = (kl + torch.log(1/delta))/(2 * N)
+    #print("KL_TERM: ", kl_term)
+    #print("bce", bce_loss)
+    # NOTE: bce_loss is average loss on training set 
+    return (batch_loss +  kl_term - torch.sqrt(kl_term * (batch_loss + kl_term)))/(batch_loss)

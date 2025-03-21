@@ -3,7 +3,7 @@ import torch.nn as nn
 from data.dataloader import get_bMNIST
 from train_kfac import train
 
-from utils.pac_bayes_loss import pac_bayes_loss
+from utils.pac_bayes import pac_bayes_loss
 from utils.config import *
 from models.bnn import BayesianNN
 from optimizers.kfac import KFACOptimizer

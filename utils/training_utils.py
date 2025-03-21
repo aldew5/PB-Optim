@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from utils.pac_bayes_loss import pac_bayes_loss2
+from utils.pac_bayes import pac_bayes_loss2
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -92,9 +92,6 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
     correct = 0
     total = 0
 
-    kfac = False
-    if net.approx == "kfac":
-        kfac = True
 
     lr_scheduler.step()
     desc = ('[%s][LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)' %
@@ -120,7 +117,7 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
         optimizer.acc_stats = True
         
         # for updating the kfactors
-        if optim_name in ['kfac', 'ekfac', 'noisy-kfac'] and optimizer.steps % optimizer.T_stats == 0:
+        if optim_name in ['kfac', 'ekfac', 'noisy-kfac', 'noisy-kfac-pb'] and optimizer.steps % optimizer.T_stats == 0:
             # compute true fisher
             optimizer.acc_stats = True
             with torch.no_grad():
@@ -128,6 +125,8 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
                                               1).squeeze().float()
             if loss_type == "bce":
                 loss_sample = bce_loss(outputs[0], sampled_y.unsqueeze(1))
+                optimizer.kl = outputs[1].detach()
+                optimizer.bce_loss = loss_sample.detach()
             else:
                 loss_sample = pac_bayes_loss2(outputs, sampled_y.unsqueeze(1), option="1")
             
@@ -179,6 +178,7 @@ def test_kfac(epoch, net, testloader, lr_scheduler, writer, errs, kls, bces, los
             #print("KL", outputs[1], net.p_log_sigma)
             if loss_type == "bce":
                 loss = bce_loss(outputs[0], targets)
+                print("KL:", outputs[1])
             else:
                 loss = pac_bayes_loss2(outputs, targets, kfac=kfac)
 
