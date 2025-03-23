@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from utils.kfac_utils import *
 from utils.sampling import *
+from utils.config import *
 
 
 class BayesianLinear(nn.Module):
@@ -16,6 +17,7 @@ class BayesianLinear(nn.Module):
                  init_value=1e-2, 
                  precision="float32", 
                  optimizer="sgd",
+                 gamma_ex=gamma_ex,
                  lam=1,
                  N=60000):
         """
@@ -52,6 +54,9 @@ class BayesianLinear(nn.Module):
         self.training = True
         self.bias = None # temporary hack because this is checked by the optimizer
         self.q_bias_mu = None
+
+
+        self.gamma_ex = gamma_ex
 
         # kfacatored posterior approximation
         if self.approx == 'kfac':
@@ -104,7 +109,7 @@ class BayesianLinear(nn.Module):
 
             #kl = self.kl_divergence_both_kfactored(self.out_features, self.in_features + 1)
             p_sigma = torch.exp(p_log_sigma)
-            kl = self.kl_divergence_kfac_diag_prior(self.p_mu, p_log_sigma, self.q_mu)
+            kl = self.kl_divergence_kfac_diag_prior(self.p_mu, p_sigma, self.q_mu)
 
             # sample the weights from MN(q_mu, lambda/N * A^{-1}, G^{-1}) = N(q_mu, G^{-1} otimes A^{-1})
             # NOTE: A^{-1} has already been scaled by lam/N
@@ -125,7 +130,7 @@ class BayesianLinear(nn.Module):
             
             # unconstrained optimization over log q_sigma
             # NOTE: weight.data update is async and does not occur ontime in the sgd/adam case
-            elif self.optimizer == "sgd" or self.optimizer == "adam" or self.optimizer=="ivon":
+            elif self.optimizer == "sgd" or self.optimizer == "adam" or self.optimizer == "ivon":
                 q_sigma = torch.exp(self.q_log_sigma)
                
                 weights = self.q_mu + torch.sqrt(q_sigma) * torch.randn_like(q_sigma)
@@ -164,6 +169,7 @@ class BayesianLinear(nn.Module):
                 q_sigma = torch.exp(self.q_log_sigma)
             kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
         else:
+            print("CORRECT KL")
             #kl = self.kl_divergence_both_kfactored(self._G.shape[0], self._A.shape[0])
             kl = self.kl_divergence_kfac_diag_prior(self.p_mu, p_sigma, self.q_mu)
         return kl
@@ -273,7 +279,7 @@ class BayesianLinear(nn.Module):
         # Retrieve the KFAC blocks from this class
         A, G = self._A, self._G
         n, m = A.shape[0], G.shape[0]
-        damping = torch.sqrt(self.lam/(self.N * p_sigma**2))
+        damping = torch.sqrt(self.lam/(self.N * p_sigma**2)) + self.gamma_ex
 
         # values have not yet been computed by the optimizer
         if self.Q_A is None:

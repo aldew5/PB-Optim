@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from utils.config import *
 
 from models.bayes_linear import BayesianLinear
 
@@ -12,7 +13,7 @@ class BayesianNN(nn.Module):
                  in_features: int = 784,
                  out_features: int = 1,
                  hidden_features: int = 300,
-                 p_log_sigma: float = 0,#-1.16,
+                 p_log_sigma: float = p_log_sigma,#-1.16,
                  approx="diagonal",
                  precision="float32", 
                  optimizer="sgd",

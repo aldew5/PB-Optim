@@ -13,5 +13,9 @@ pi = torch.tensor(math.pi, dtype=torch.float32).to(device)
 delta_prime = torch.tensor(0.01, dtype=torch.float32).to(device)
 
 
+#4425 (there's randomness)
+p_log_sigma = torch.tensor(.1, dtype=torch.float32).to(device)
+gamma_ex= torch.tensor(1e-6, dtype=torch.float32).to(device)
+
 SAVE_WEIGHTS = True
 LOAD_DATA = False

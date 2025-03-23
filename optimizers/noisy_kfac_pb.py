@@ -3,6 +3,7 @@ import torch.optim as optim
 from utils.kfac_utils import *
 import math
 from utils.pac_bayes import compute_b
+from utils.config import *
 
 
 
@@ -17,10 +18,10 @@ class NoisyKFACPB(optim.Optimizer):
             momentum=0.9, # for updating kfactors
             lam: int = 0.5, # kl weighting
             kl_clip=0.001,
-            eta= 1.0, #prior variance for p_log_sigma fixed
+            eta= torch.exp(2 * p_log_sigma), #prior variance for p_log_sigma fixed
             T_stats=10,
             T_inv=100,
-            gamma_ex=1e-3,
+            gamma_ex=gamma_ex,
             batch_averaged=True,
             precision="float32",
             batch_size=100
@@ -31,6 +32,7 @@ class NoisyKFACPB(optim.Optimizer):
         super().__init__(params, defaults)
         self.model = model
         self.damping = gamma_ex + lam/(N * eta)
+        self.gamma_ex = gamma_ex
 
         self.m_aa, self.m_gg = {}, {}
         self.Q_a, self.Q_g = {}, {}
@@ -124,7 +126,7 @@ class NoisyKFACPB(optim.Optimizer):
         # update KL weighting to reflect new KL, bce_loss
         b = compute_b(self.kl, self.bce_loss, self.N, self.batch_size)
         self.lam = 1/(2 * (1 - b) * self.N)
-        damp = torch.sqrt(self.lam/(self.N * self.eta))
+        damp = torch.sqrt(self.lam/(self.N * self.eta)) + self.gamma_ex
 
         # give model access to eigenvectors, etc. for sampling from kfactored distr
         if self.model.approx != "diagonal":
