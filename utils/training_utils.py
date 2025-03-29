@@ -35,13 +35,15 @@ def train_sgd(net: nn.Module,
     kls = []
     bces = []
 
+    # USE BCE
+    loss_fn = bce_loss
+
     net.train()
 
     for epoch in range(num_epochs):
         running_loss = 0.
         running_acc = 0.
 
-        outputs = None
         for inputs, labels in trainloader:
             cm = optimizer.sampled_params(train=True) if (optim_name == "ivon" or optim_name=='ivonpb') else contextlib.nullcontext()
             with cm:
@@ -58,7 +60,7 @@ def train_sgd(net: nn.Module,
                     optimizer.state['kl'] = kl
                     optimizer.state['lam'] = lam
 
-                loss_size = loss_fn(outputs, labels)
+                loss_size = loss_fn(outputs[0], labels)
                 #print(loss_size)
 
                 loss_size.backward()

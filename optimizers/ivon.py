@@ -130,6 +130,7 @@ class IVON(torch.optim.Optimizer):
         param_avg, noise = self._sample_params()
         yield
         self._restore_param_average(train, param_avg, noise)
+        pass
 
     def _restore_param_average(
         self, train: bool, param_avg: Tensor, noise: Tensor
@@ -216,7 +217,7 @@ class IVON(torch.optim.Optimizer):
                 p_noise = noise_sample[goffset : goffset + numel]
 
                 param_avgs.append(p_avg)
-                p.data = (p_avg + p_noise).view(p.shape)
+                #p.data = (p_avg + p_noise).view(p.shape)
                 goffset += numel
                 offset += numel
             assert goffset == group["numel"]  # sanity check

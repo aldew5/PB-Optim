@@ -7,8 +7,8 @@ from models.bnn import BayesianNN
 from optimizers.kfac import KFACOptimizer
 from optimizers.noisy_kfac import NoisyKFAC
 from optimizers.ivon import IVON
-from optimizers.ivon_pb import IVONPB
-from optimizers.noisy_kfac_pb import NoisyKFACPB
+#from optimizers.ivon_pb import IVONPB
+#from optimizers.noisy_kfac_pb import NoisyKFACPB
 
 from tensorboardX import SummaryWriter
 from data.dataloader import get_bMNIST
@@ -32,7 +32,7 @@ optim_name = args.optimizer.lower()
 tag = optim_name
 
 #TODO: empirical good choice for p log sigma
-net = BayesianNN(w0, w1, p_log_sigma=-1.16,  approx=args.approx, optimizer=optim_name, precision=args.precision).to(device)
+net = BayesianNN(w1, w1, p_log_sigma=-1.16,  approx=args.approx, optimizer=optim_name, precision=args.precision).to(device)
 #net = MLP()
 #net.train()
 #model = MLP()
@@ -101,7 +101,7 @@ if optim_name == "ivon" or optim_name == 'ivonpb':
     if not LOAD_DATA:
         bnn_losses, bnn_errors, kls, bces = train_sgd(net, args.epoch, optimizer, lr_scheduler, trainloader, pac_bayes_loss2, device)
 
-        N_samples = 10
+        N_samples = 1
         plot = True
         save_plot = False
         evaluate_BNN(net, trainloader, testloader, delta, delta_prime, b, c, N_samples, device, bnn_losses, bnn_errors, kls, bces, plot=plot, save_plot=save_plot)

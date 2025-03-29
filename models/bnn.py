@@ -38,7 +38,7 @@ class BayesianNN(nn.Module):
         self.approx = approx
         # TODO: fixed log sigma for now because it gets pushed too small if we let it vary
         # find closed form optimal?
-        self.p_log_sigma = nn.Parameter(torch.tensor(p_log_sigma, dtype=getattr(torch, precision)))
+        self.p_log_sigma = nn.Parameter(torch.tensor(p_log_sigma, dtype=getattr(torch, precision)), requires_grad=False)
 
         self.in_features = in_features
         self.out_features = out_features

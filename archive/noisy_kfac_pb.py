@@ -16,7 +16,7 @@ class NoisyKFACPB(optim.Optimizer):
             beta: float = 1e-2,
             weight_decay: float = 1e-4,
             momentum=0.9, # for updating kfactors
-            lam: int = 0.5, # kl weighting
+            lam: int = 0.00001, # kl weighting
             kl_clip=0.001,
             eta= torch.exp(2 * p_log_sigma), #prior variance for p_log_sigma fixed
             T_stats=10,
@@ -125,7 +125,7 @@ class NoisyKFACPB(optim.Optimizer):
 
         # update KL weighting to reflect new KL, bce_loss
         b = compute_b(self.kl, self.bce_loss, self.N, self.batch_size)
-        self.lam = 1/(2 * (1 - b) * self.N)
+        #self.lam = 1/(2 * (1 - b) * self.N)
         damp = torch.sqrt(self.lam/(self.N * self.eta)) + self.gamma_ex
 
         # give model access to eigenvectors, etc. for sampling from kfactored distr

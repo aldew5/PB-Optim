@@ -61,8 +61,15 @@ class BayesianLinear(nn.Module):
         # kfacatored posterior approximation
         if self.approx == 'kfac':
             # init fixed kfactored prior with empirically chosen values
-            self.A_prior = torch.load(f"priors/A{self.id}.pt").type(getattr(torch, self.precision))
-            self.G_prior = torch.load(f"priors/G{self.id}.pt").type(getattr(torch, self.precision))
+            #self.A_prior = torch.load(f"priors/A{self.id}.pt").type(getattr(torch, self.precision))
+            #self.G_prior = torch.load(f"priors/G{self.id}.pt").type(getattr(torch, self.precision))
+            self.A_prior = init_value * torch.eye(self.in_features + 1, dtype=getattr(torch, precision)) 
+            self.G_prior = init_value * torch.eye(self.out_features, dtype=getattr(torch, precision))
+            shape = torch.cat((
+                    init_q["weight"].to(getattr(torch, precision)),
+                    init_q["bias"].to(getattr(torch, precision)).unsqueeze(1)
+                ), dim=1).shape
+            self.p_sigma =  nn.Parameter(torch.tensor(1e-2), requires_grad=False)
 
             # FIM \approx A \otimes G
             self._A = init_value * torch.eye(self.in_features + 1, dtype=getattr(torch, precision)) 
@@ -77,24 +84,26 @@ class BayesianLinear(nn.Module):
             self.dG, self.dA = None, None
             self.Q_G, self.Q_A = None, None
             self.lam, self.N = lam, N
-            self.weights =  nn.Parameter(init_q["weight"].to(getattr(torch, precision)))
+            self.weights = nn.Parameter(torch.cat((init_q["weight"].to(getattr(torch, precision)), 
+                                                init_q['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1)) 
         
 
         else:
-            if optimizer == 'ivonpb':
-                self.q_sigma = nn.Parameter(torch.cat((0.5 *torch.abs(init_q["weight"].to(getattr(torch, precision) )), \
-                                                   0.5 * torch.abs(init_q["bias"].to(getattr(torch, precision))).unsqueeze(1)), dim=1), requires_grad=False)
+            if optimizer == "sgd" or optimizer  == "adam" or optimizer=="ivon":
+                shape = torch.cat((
+                    init_q["weight"].to(getattr(torch, precision)),
+                    init_q["bias"].to(getattr(torch, precision)).unsqueeze(1)
+                ), dim=1).shape
+
+                self.q_sigma = nn.Parameter(0.05 * torch.ones(shape).to(getattr(torch, precision)), requires_grad=False)
+                self.p_sigma =  nn.Parameter(0.05 * torch.ones(shape).to(getattr(torch, precision)), requires_grad=False)
+
                 self.q_mu = nn.Parameter(torch.cat((init_q["weight"].to(getattr(torch, precision)),\
                                                      init_q['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1))#.to(getattr(torch, precision))
-            elif optimizer == "sgd" or optimizer  == "adam" or optimizer=="ivon":
-                self.q_log_sigma = nn.Parameter(torch.cat((0.5 * torch.log(torch.abs(init_q["weight"].to(getattr(torch, precision)) )), \
-                                                   0.5 * torch.log(torch.abs(init_q["bias"].to(getattr(torch, precision)) )).unsqueeze(1)), dim=1))
-                self.q_mu = nn.Parameter(torch.cat((init_q["weight"].to(getattr(torch, precision)),\
-                                                     init_q['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1))#.to(getattr(torch, precision))
-            else:
+            elif optimizer == "kfac":
                 # F \approx A \otimes G
-                self.A_inv = 0.3* torch.eye(self.in_features + 1, dtype=getattr(torch, precision))
-                self.G_inv = 0.3* torch.eye(self.out_features, dtype=getattr(torch, precision))
+                self.A_inv = 0.3 * torch.eye(self.in_features + 1, dtype=getattr(torch, precision))
+                self.G_inv = 0.3 * torch.eye(self.out_features, dtype=getattr(torch, precision))
                 self.q_mu = nn.Parameter(torch.cat((init_q["weight"].to(getattr(torch, precision)), 
                                                 init_q['bias'].unsqueeze(1).to(getattr(torch, precision))), dim=1)) 
                 self.weights =  nn.Parameter(init_q["weight"].to(getattr(torch, precision)))
@@ -108,8 +117,8 @@ class BayesianLinear(nn.Module):
             x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1).type(getattr(torch, self.precision))
 
             #kl = self.kl_divergence_both_kfactored(self.out_features, self.in_features + 1)
-            p_sigma = torch.exp(p_log_sigma)
-            kl = self.kl_divergence_kfac_diag_prior(self.p_mu, p_sigma, self.q_mu)
+            kl = self.kl_divergence_kfac_diag_prior(self.p_mu, self.p_sigma, self.q_mu)
+            print("KL:", kl)
 
             # sample the weights from MN(q_mu, lambda/N * A^{-1}, G^{-1}) = N(q_mu, G^{-1} otimes A^{-1})
             # NOTE: A^{-1} has already been scaled by lam/N
@@ -123,24 +132,24 @@ class BayesianLinear(nn.Module):
             x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1).type(getattr(torch, self.precision))
             p_sigma = torch.exp(p_log_sigma)
 
-            if self.optimizer == 'ivonpb':
+            if self.optimizer == 'ivon':
                 weights = self.q_mu + self.q_sigma * torch.randn_like(self.q_sigma)
                 outputs = F.linear(x, weights, torch.zeros(self.out_features).type(getattr(torch, self.precision)))
-                kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, self.q_sigma)
-            
+                kl = self.kl_normal_diag(self.p_mu, self.p_sigma, self.q_mu, self.q_sigma)
+       
             # unconstrained optimization over log q_sigma
             # NOTE: weight.data update is async and does not occur ontime in the sgd/adam case
-            elif self.optimizer == "sgd" or self.optimizer == "adam" or self.optimizer == "ivon":
+            elif self.optimizer == "sgd" or self.optimizer == "adam":
                 q_sigma = torch.exp(self.q_log_sigma)
                
-                weights = self.q_mu + torch.sqrt(q_sigma) * torch.randn_like(q_sigma)
+                weights = self.q_mu + q_sigma * torch.randn_like(q_sigma)
                 outputs = F.linear(x, weights, torch.zeros(self.out_features).type(getattr(torch, self.precision)))
                 kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
             # q sigma via diagonal learned kfactors
             else:
                 diag_G_inv, diag_A_inv = torch.diag(self.G_inv), self.lam/self.N * torch.diag(self.A_inv)
                 q_sigma = torch.outer(diag_G_inv, diag_A_inv).reshape(-1).view(self.out_features, self.in_features + 1)
-                self.weights.data = self.q_mu + torch.sqrt(q_sigma) * torch.randn_like(q_sigma)
+                self.weights.data = self.q_mu + q_sigma * torch.randn_like(q_sigma)
 
                 outputs = F.linear(x, self.weights, torch.zeros(self.out_features).type(getattr(torch, self.precision)))
 
@@ -163,13 +172,13 @@ class BayesianLinear(nn.Module):
         p_sigma = torch.exp(p_log_sigma)
         
         if self.approx == 'diagonal':
-            if self.optimizer == 'ivonpb':
+            if self.optimizer == 'ivonpb' or self.optimizer == "ivon":
                 q_sigma = self.q_sigma
+                p_sigma = self.p_sigma
             else:
                 q_sigma = torch.exp(self.q_log_sigma)
             kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
         else:
-            print("CORRECT KL")
             #kl = self.kl_divergence_both_kfactored(self._G.shape[0], self._A.shape[0])
             kl = self.kl_divergence_kfac_diag_prior(self.p_mu, p_sigma, self.q_mu)
         return kl
@@ -313,15 +322,6 @@ class BayesianLinear(nn.Module):
         
         # trace_term = trace(A) * trace(G) / p_sigma^2
         trace_term = torch.trace(A_inv) * torch.trace(G_inv) * 1.0/(p_sigma**2)
-        #dA, Q_A = torch.linalg.eigh(A_inv)
-        #dA = torch.clamp(dA, min=epsilon) 
-        #dG, Q_G = torch.linalg.eigh(G_inv) 
-        #dG = torch.clamp(dG, min=epsilon)
-       # print("SUM", torch.sum(dA))
-        #print("DG")
-        #print(torch.max(dG))
-        #trace_term = torch.sum(dA + epsilon)*torch.sum(dG + epsilon) * 1.0/ p_sigma**2
-       # print("TRACE: ", trace_term,  torch.trace(A_inv), torch.trace(G_inv), 1/(p_sigma**2))
         
         diff = q_weight_mu - p_mu
         quad_term = (1.0 / (p_sigma**2)) * torch.sum(diff**2)
