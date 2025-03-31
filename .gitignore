@@ -6,4 +6,5 @@ runs
 .venv
 *.pt
 *.pkl
+.DS_Store
 *.npz
