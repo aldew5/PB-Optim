@@ -61,15 +61,16 @@ class BayesianLinear(nn.Module):
         # kfacatored posterior approximation
         if self.approx == 'kfac':
             # init fixed kfactored prior with empirically chosen values
-            #self.A_prior = torch.load(f"priors/A{self.id}.pt").type(getattr(torch, self.precision))
-            #self.G_prior = torch.load(f"priors/G{self.id}.pt").type(getattr(torch, self.precision))
-            self.A_prior = init_value * torch.eye(self.in_features + 1, dtype=getattr(torch, precision)) 
-            self.G_prior = init_value * torch.eye(self.out_features, dtype=getattr(torch, precision))
-            shape = torch.cat((
-                    init_q["weight"].to(getattr(torch, precision)),
-                    init_q["bias"].to(getattr(torch, precision)).unsqueeze(1)
-                ), dim=1).shape
-            self.p_sigma =  nn.Parameter(torch.tensor(1e-2), requires_grad=False)
+            self.A_prior = torch.load(f"priors/A{self.id}.pt").type(getattr(torch, self.precision))
+            self.G_prior = torch.load(f"priors/G{self.id}.pt").type(getattr(torch, self.precision))
+           
+            #self.A_prior = init_value * torch.eye(self.in_features + 1, dtype=getattr(torch, precision)) 
+            #self.G_prior = init_value * torch.eye(self.out_features, dtype=getattr(torch, precision))
+            #shape = torch.cat((
+            #        init_q["weight"].to(getattr(torch, precision)),
+            #        init_q["bias"].to(getattr(torch, precision)).unsqueeze(1)
+            #    ), dim=1).shape
+            #self.p_sigma =  nn.Parameter(torch.tensor(1e-2), requires_grad=False)
 
             # FIM \approx A \otimes G
             self._A = init_value * torch.eye(self.in_features + 1, dtype=getattr(torch, precision)) 
@@ -116,12 +117,11 @@ class BayesianLinear(nn.Module):
         if self.approx == 'kfac':
             x = torch.cat([x, torch.ones(x.size(0), 1)], dim=1).type(getattr(torch, self.precision))
 
-            #kl = self.kl_divergence_both_kfactored(self.out_features, self.in_features + 1)
-            kl = self.kl_divergence_kfac_diag_prior(self.p_mu, self.p_sigma, self.q_mu)
-            print("KL:", kl)
+            kl = self.kl_divergence_both_kfactored(self.out_features, self.in_features + 1)
+            #kl = self.kl_divergence_kfac_diag_prior(self.p_mu, self.p_sigma, self.q_mu)
 
             # sample the weights from MN(q_mu, lambda/N * A^{-1}, G^{-1}) = N(q_mu, G^{-1} otimes A^{-1})
-            # NOTE: A^{-1} has already been scaled by lam/N
+            # NOTE: A^{-1} has NOT already been scaled by lam/N; this is handled in sampling
             self.weights.data = sample_matrix_normal(self.q_mu, self.A_inv, self.G_inv,
                                                   precision=self.precision, lam=self.lam, N=self.N).view(self.out_features, self.in_features + 1)
             outputs = F.linear(x, self.weights, torch.zeros(self.out_features).type(getattr(torch, self.precision)))
@@ -179,18 +179,18 @@ class BayesianLinear(nn.Module):
                 q_sigma = torch.exp(self.q_log_sigma)
             kl = self.kl_normal_diag(self.p_mu, p_sigma, self.q_mu, q_sigma)
         else:
-            #kl = self.kl_divergence_both_kfactored(self._G.shape[0], self._A.shape[0])
-            kl = self.kl_divergence_kfac_diag_prior(self.p_mu, p_sigma, self.q_mu)
+            kl = self.kl_divergence_both_kfactored(self._G.shape[0], self._A.shape[0])
+            #kl = self.kl_divergence_kfac_diag_prior(self.p_mu, p_sigma, self.q_mu)
         return kl
     
 
-    def kl_divergence_both_kfactored(self, m, n, epsilon=1e-6):
+    def kl_divergence_both_kfactored(self, m, n, epsilon=1e-3):
         """
         Compute the KL divergence KL(q||p) between two Gaussians with
         Kronecker-factored covariances:
         
-        p(W) = N(p_mu,  Σ_p) with Σ_p = p_G^{-1} ⊗ p_A^{-1}
-        q(W) = N(q_mu,  Σ_q) with Σ_q = q_G^{-1} ⊗ q_A^{-1}
+        p(W) = N(p_mu,  Σ_p) with Σ_p = (lam/N) * (p_G^{-1} ⊗ p_A^{-1})
+        q(W) = N(q_mu,  Σ_q) with Σ_q = (lam/N) * (q_G^{-1} ⊗ q_A^{-1})
         
         where:
         - p_mu, q_mu are vectors of length m*n.
@@ -199,7 +199,7 @@ class BayesianLinear(nn.Module):
         
         The KL divergence is given by:
         
-        KL(q||p) = 0.5 * [ log(|Σ_p|/|Σ_q|) - d + tr(Σ_p^{-1} Σ_q) 
+        KL(q||p) = 0.5 * [ log(|Σ_p|/|Σ_q|) - d + tr(Σ_p^{-1} Σ_q)
                             + (q_mu - p_mu)^T Σ_p^{-1} (q_mu - p_mu) ]
         with d = m * n.
         
@@ -217,44 +217,46 @@ class BayesianLinear(nn.Module):
         Returns:
         torch.Tensor: Scalar KL divergence.
         """
+        # Retrieve the parameters from the instance
         p_mu, p_A, p_G = self.p_mu, self.A_prior, self.G_prior
         q_mu, q_A, q_G = self.q_mu, self._A, self._G
 
-        
         d_total = m * n
 
+        # Compute the inverses and log-determinants for the q-factors.
         if self.Q_A is None:
-            # Eigen-decomposition for the posterior factors:
+            # Compute eigen-decomposition for the posterior factors:
             d_q_A, Q_q_A = torch.linalg.eigh(q_A + epsilon * torch.eye(n, device=q_A.device, dtype=q_A.dtype))
             d_q_G, Q_q_G = torch.linalg.eigh(q_G + epsilon * torch.eye(m, device=q_G.device, dtype=q_G.dtype))
             logdet_q_A = torch.sum(torch.log(d_q_A))
             logdet_q_G = torch.sum(torch.log(d_q_G))
-
-             # Inverse of the posterior factors (using eigen-decomposition):
+            
+            # Inverse of the posterior factors (using eigen-decomposition):
             inv_d_q_A = 1.0 / d_q_A
             q_A_inv = Q_q_A @ torch.diag(inv_d_q_A) @ Q_q_A.T
             inv_d_q_G = 1.0 / d_q_G
             q_G_inv = Q_q_G @ torch.diag(inv_d_q_G) @ Q_q_G.T
         else:
-            _, logdet_q_A = torch.linalg.slogdet(q_A + torch.eye(n, device=q_A.device) * epsilon)
-            _, logdet_q_G = torch.linalg.slogdet(q_G + torch.eye(m, device=q_G.device) * epsilon)
-            # NOTE: we scale A_inverse
-            q_A_inv, q_G_inv = self.lam/self.N * self.A_inv, self.G_inv   
+            # Use pre-computed inverses and log-determinants; do not re-scale them here.
+            _, logdet_q_A = torch.linalg.slogdet(q_A + epsilon * torch.eye(n, device=q_A.device, dtype=q_A.dtype))
+            _, logdet_q_G = torch.linalg.slogdet(q_G + epsilon * torch.eye(m, device=q_G.device, dtype=q_G.dtype))
+            q_A_inv, q_G_inv = self.A_inv, self.G_inv
 
-        # Eigen-decomposition for the prior factors:
+        # Compute eigen-decomposition for the prior factors:
         d_p_A, _ = torch.linalg.eigh(p_A + epsilon * torch.eye(n, device=p_A.device, dtype=p_A.dtype))
         d_p_G, _ = torch.linalg.eigh(p_G + epsilon * torch.eye(m, device=p_G.device, dtype=p_G.dtype))
         logdet_p_A = torch.sum(torch.log(d_p_A))
         logdet_p_G = torch.sum(torch.log(d_p_G))
         
         # Log-determinant term:
-        # log(|Σ_p|/|Σ_q|) = n*(log|q_G| - log|p_G|) + m*(log|q_A| - log|p_A|)
+        # For covariances of the form Σ = scale*(Factor^{-1} ⊗ Factor^{-1}),
+        # we have: log(|Σ|) = m*n*log(scale) - n*log|p_G| - m*log|p_A|.
+        # Thus, the ratio becomes:
         logdet_term = n * (logdet_q_G - logdet_p_G) + m * (logdet_q_A - logdet_p_A)
         
         # Trace term:
-        # Σ_p^{-1} = p_G ⊗ p_A, and Σ_q = q_G^{-1} ⊗ q_A^{-1}, so:
-        # trace(Σ_p^{-1} Σ_q) = trace(p_G @ q_G_inv) * trace(p_A @ q_A_inv)
-        #print("HERE", p_A.dtype, q_A_inv.dtype)
+        # Given Σ_p^{-1} = (N/lam) * (p_G ⊗ p_A) and Σ_q = scale*(q_G^{-1} ⊗ q_A^{-1}),
+        # the scale factors cancel in the product, so:
         q_A_inv = q_A_inv.double()
         trace_term = torch.trace(p_G @ q_G_inv) * torch.trace(p_A @ q_A_inv)
         
@@ -262,14 +264,11 @@ class BayesianLinear(nn.Module):
         # Reshape (q_mu - p_mu) into an (m x n) matrix.
         delta = (q_mu - p_mu).view(m, n)
         # Using the identity: vec(Δ)^T (p_G ⊗ p_A) vec(Δ) = trace(p_A Δ^T p_G Δ)
-        #print(p_A.dtype, delta.dtype, p_G.dtype)
-        quadratic_term = torch.trace(p_A @ delta.T @ p_G @ delta)
+        quadratic_term = (self.N / self.lam) * torch.trace(p_A @ delta.T @ p_G @ delta)
         
         kl = 0.5 * (logdet_term - d_total + trace_term + quadratic_term)
-        #print("KL", trace_term, kl)
-        #print(q_A, q_G)
-
         return kl
+
     
     def kl_divergence_kfac_diag_prior(self, p_mu, p_sigma, q_weight_mu, epsilon=1e-8):
         #NOTE: make sure the eps aligns with clamping param in kfac/noisy-kfac
@@ -327,14 +326,12 @@ class BayesianLinear(nn.Module):
         quad_term = (1.0 / (p_sigma**2)) * torch.sum(diff**2)
 
 
-        #print(log_det_A, log_det_G, trace_term, quad_term)
         kl = 0.5 * (
             (m * log_det_A + n * log_det_G + log_det_prior - m * n)
             + trace_term
             + quad_term
         )
         
-        #print("KL:", kl)
         if kl < 0:
             kl = torch.tensor(0)
     

@@ -134,10 +134,22 @@ def train_kfac(epoch, optimizer, net, trainloader, lr_scheduler, writer, optim_n
             
             loss_sample.backward(retain_graph=True)
             optimizer.acc_stats = False
+            #print("ININININI", net.layers[0]._G)
+            #for i, layer in enumerate(net.layers):
+        #    print("SAVE")
+            #    torch.save(layer._A, f'priors/A{i}.pt')
+            #    torch.save(layer._G, f'priors/G{i}.pt')
             optimizer.zero_grad()  # clear the gradient for computing true-fisher.
 
         loss.backward()
         optimizer.step()
+
+        # save the prior after first iteration
+        #for i, layer in enumerate(net.layers):
+        #    #print("SAVE")
+        #    torch.save(layer._A, f'priors/A{i}.pt')
+        #    torch.save(layer._G, f'priors/G{i}.pt')
+        #break
 
 
         train_loss += loss.item()
@@ -177,10 +189,9 @@ def test_kfac(epoch, net, testloader, lr_scheduler, writer, errs, kls, bces, los
             inputs, targets = inputs.to(device), targets.to(device).float().view(-1, 1)
             outputs = net(inputs)
             outputs[0].data = torch.clamp(outputs[0].data, min=-10, max=10)
-            #print("KL", outputs[1], net.p_log_sigma)
+
             if loss_type == "bce":
                 loss = bce_loss(outputs[0], targets)
-                print("KL:", outputs[1])
             else:
                 loss = pac_bayes_loss2(outputs, targets, kfac=kfac)
 

@@ -12,7 +12,7 @@ class NoisyKFAC(optim.Optimizer):
             model,
             N=60000,
             lr=0.01, 
-            damping=1, 
+            damping=1e-3, 
             beta: float = 1e-2,
             weight_decay: float = 1e-4,
             momentum=0.9, # for updating kfactors
