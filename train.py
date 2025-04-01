@@ -47,16 +47,16 @@ elif optim_name == "adam":
 elif optim_name == 'noisy-kfac':
     optimizer = NoisyKFAC(net, T_stats=1, T_inv=10,  lr=1e-3, damping=0.001, 
                           weight_decay=0, N=len(trainloader), precision=args.precision)  
-elif optim_name == 'noisy-kfac-pb':
-    optimizer = NoisyKFACPB(net, T_stats=1, T_inv=10,  lr=1e-3, damping=0.001, 
-                          weight_decay=0, N=len(trainloader), precision=args.precision, batch_size=100)    
+#elif optim_name == 'noisy-kfac-pb':
+#    optimizer = NoisyKFACPB(net, T_stats=1, T_inv=10,  lr=1e-3, damping=0.001, 
+#                          weight_decay=0, N=len(trainloader), precision=args.precision, batch_size=100)    
 elif optim_name == "kfac":
     optimizer = KFACOptimizer(net, lr=0.019908763029878117, damping=0.09398758455968932, weight_decay=0)
 elif optim_name == "ivon":
-    optimizer = IVON(net.parameters(), lr=args.learning_rate, ess=len(trainloader))
-elif optim_name == 'ivonpb':
-    lam = torch.exp(net.p_log_sigma)
-    optimizer = IVONPB(net, net.parameters(), lr=args.learning_rate, ess=len(trainloader), delta=delta, lam=lam)
+    optimizer = IVON(net.parameters(), lr=args.learning_rate, ess=len(trainloader) * 0.5)
+#elif optim_name == 'ivonpb':
+#    lam = torch.exp(net.p_log_sigma)
+#    optimizer = IVONPB(net, net.parameters(), lr=args.learning_rate, ess=len(trainloader), delta=delta, lam=lam)
 else:
     raise NotImplementedError
 
